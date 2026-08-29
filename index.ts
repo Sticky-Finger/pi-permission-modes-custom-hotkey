@@ -3,7 +3,8 @@
  *
  * Claude-Code-style permission modes for the pi coding agent.
  *
- * Four modes (Shift+Tab): ask → plan → auto → bypass → ask
+ * Four modes (Shift+Tab by default — configurable via `shortcuts` in
+ * ~/.pi/agent/permission-modes.json): ask → plan → auto → bypass → ask
  *   - ask     Manual approval for edits, outside-cwd access, mutating bash.
  *   - plan    Read-only; only plan.md may be written.
  *   - auto    Tiered auto-approve + optional built-in classifier + risk blacklist.
@@ -33,6 +34,7 @@ import {
   loadPermissionModesConfig,
   resolveAutoModeConfig,
   resolveClassifierConfig,
+  resolveShortcuts,
 } from "./config.ts";
 import {
   restoreDangerousPermissionRules,
@@ -175,6 +177,9 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
   let projectRoot: string | null = null;
   let classifierConfig = resolveClassifierConfig(loadPermissionModesConfig());
   let autoModeConfig = resolveAutoModeConfig(loadPermissionModesConfig());
+  // Shortcuts are resolved once at load time; /reload re-runs the factory so config
+  // changes take effect on reload without extra plumbing.
+  const SHORTCUTS = resolveShortcuts(loadPermissionModesConfig());
   let basePermissionRules: PermissionRule[] = [];
   let strippedDangerousRules: PermissionRule[] = [];
   let mergedPermissionRules: PermissionRule[] = [];
@@ -793,7 +798,7 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
         const cwdW = visibleWidth(cwdText);
         const ctxW = visibleWidth(ctxStr);
         const modelW = visibleWidth(modelStr);
-        const modeText = `${m.icon} ${m.label} (shift+tab)`;
+        const modeText = `${m.icon} ${m.label}${SHORTCUTS.cycleMode ? ` (${SHORTCUTS.cycleMode})` : ""}`;
         const modeW = visibleWidth(modeText);
 
         // Wide: line1 = cwd(L) + context(centered) + model(R), line2 = mode
@@ -1389,10 +1394,12 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
   });
 
 
-    pi.registerShortcut("shift+tab", {
-    description: "Cycle mode: Ask → Plan → Auto → Bypass",
-    handler: async (ctx) => cycleMode(ctx),
-  });
+  if (SHORTCUTS.cycleMode) {
+    pi.registerShortcut(SHORTCUTS.cycleMode, {
+      description: "Cycle mode: Ask → Plan → Auto → Bypass",
+      handler: async (ctx) => cycleMode(ctx),
+    });
+  }
 
   // Alt+T: cycle the thinking level. pi has no built-in cycle helper, and setThinkingLevel
   // clamps to the model's capabilities, so we advance to the next level the model actually
@@ -1433,11 +1440,13 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
       );
   }
 
-  pi.registerShortcut("alt+t", {
-    description:
-      "Cycle thinking level (off → minimal → low → medium → high → xhigh)",
-    handler: async (ctx) => cycleThinkingLevel(ctx),
-  });
+  if (SHORTCUTS.cycleThinking) {
+    pi.registerShortcut(SHORTCUTS.cycleThinking, {
+      description:
+        "Cycle thinking level (off → minimal → low → medium → high → xhigh)",
+      handler: async (ctx) => cycleThinkingLevel(ctx),
+    });
+  }
 
   // Alt+I: cycle through model profiles defined in `~/.pi/agent/model-profiles.json`.
   // Mirrors Shift+Tab's cycle-by-one behavior: starts at the profile after the
@@ -1466,11 +1475,13 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
     await setActiveProfile(next, ctx);
   }
 
-  pi.registerShortcut("alt+i", {
-    description:
-      "Cycle model profile (next profile from ~/.pi/agent/model-profiles.json)",
-    handler: async (ctx) => cycleProfile(ctx),
-  });
+  if (SHORTCUTS.cycleProfile) {
+    pi.registerShortcut(SHORTCUTS.cycleProfile, {
+      description:
+        "Cycle model profile (next profile from ~/.pi/agent/model-profiles.json)",
+      handler: async (ctx) => cycleProfile(ctx),
+    });
+  }
 
   // NB: pi has a built-in `--mode` (output mode: text/json/rpc), so the start-mode
   // flag must use a distinct name to avoid being shadowed at parse time.

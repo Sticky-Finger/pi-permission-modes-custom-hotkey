@@ -1,3 +1,8 @@
+## [Unreleased]
+
+### Added
+- **Configurable shortcuts**: new `shortcuts` block in `~/.pi/agent/permission-modes.json` (`cycleMode` / `cycleThinking` / `cycleProfile`). Defaults unchanged (`shift+tab` / `alt+t` / `alt+i`); keys are lowercased before registering, `null` disables a shortcut, and the footer hint follows the configured `cycleMode` key. Lets users remap off pi's reserved `shift+tab` (`app.thinking.cycle`), which silently drops extension shortcuts bound to it.
+
 ## [2.6.3] - 2026-08-02
 
 ### Fixed

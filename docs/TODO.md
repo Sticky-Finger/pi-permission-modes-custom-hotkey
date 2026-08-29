@@ -5,7 +5,7 @@
 
 ## 进行中
 
-- [ ] [Feature] 支持自定义快捷键（`shortcuts` 配置段；默认保持 `shift+tab` / `alt+t` / `alt+i` 不变）
-  - 实现计划（待审阅）：[docs/plan/20260829-2239-configurable-shortcuts.md](plan/20260829-2239-configurable-shortcuts.md)
-  - 分支：`feat/configurable-shortcuts`（自 `master` 切出，不推送远程，由用户推到 fork）
-  - 状态：⏸ 等待用户审阅计划文档，通过后开始编码实现
+- [x] [Feature] 支持自定义快捷键（`shortcuts` 配置段；默认保持 `shift+tab` / `alt+t` / `alt+i` 不变）
+  - 实现计划：[docs/plan/20260829-2239-configurable-shortcuts.md](plan/20260829-2239-configurable-shortcuts.md)
+  - 分支：`feat/configurable-shortcuts`（已提交，未推送远程，待用户推到 fork）
+  - 状态：✅ 编码实现完成，新增 12 个测试全部通过（Windows 基线上既有的 24 个失败与本次改动无关，已用基线对照确认）

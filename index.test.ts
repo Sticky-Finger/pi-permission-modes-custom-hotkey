@@ -1966,3 +1966,75 @@ describe("permission-modes: subagent inherits parent mode", () => {
 		expect(process.env.PERMISSION_MODES_INHERITED_MODE).toBe("bypass")
 	})
 })
+
+// ---- Configurable shortcuts ----------------------------------------------
+//
+// Shortcut keys resolve once at factory load from the `shortcuts` block of
+// ~/.pi/agent/permission-modes.json. Defaults (shift+tab / alt+t / alt+i) must
+// hold when nothing is configured; individual keys can be overridden,
+// normalized to lowercase, or disabled with `null`.
+
+describe("permission-modes extension: configurable shortcuts", () => {
+	let pi: FakePi
+	let configTmp: string
+
+	beforeEach(() => {
+		pi = createFakePi()
+		configTmp = mkdtempSync(join(tmpdir(), "pm-idx-sc-"))
+		setConfigPath(join(configTmp, "permission-modes.json"))
+		// Nonexistent models path keeps profile switching out of these tests.
+		setModelsPath(
+			join(configTmp, `model-profiles-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`),
+		)
+	})
+
+	function writeConfig(cfg: unknown) {
+		writeFileSync(join(configTmp, "permission-modes.json"), JSON.stringify(cfg))
+	}
+
+	it("registers the default shortcuts when no shortcuts config exists", () => {
+		writeConfig({ classifier: { enabled: false } })
+		permissionModesExtension(makeFakePiForExtension(pi))
+		expect(pi.shortcuts.has("shift+tab")).toBe(true)
+		expect(pi.shortcuts.has("alt+t")).toBe(true)
+		expect(pi.shortcuts.has("alt+i")).toBe(true)
+	})
+
+	it("registers a custom cycleMode key instead of the default", () => {
+		writeConfig({ shortcuts: { cycleMode: "ctrl+shift+m" } })
+		permissionModesExtension(makeFakePiForExtension(pi))
+		expect(pi.shortcuts.has("ctrl+shift+m")).toBe(true)
+		expect(pi.shortcuts.has("shift+tab")).toBe(false)
+	})
+
+	it("custom cycleMode shortcut cycles modes (ask → plan)", async () => {
+		writeConfig({ shortcuts: { cycleMode: "ctrl+shift+m" } })
+		permissionModesExtension(makeFakePiForExtension(pi))
+		await pi.simulateSessionStart(process.cwd())
+		const notifications: string[] = []
+		await pi.simulateShortcut(
+			"ctrl+shift+m",
+			makeCtx(pi, {
+				cwd: process.cwd(),
+				ui: {
+					notify: (msg: string) => notifications.push(msg),
+					select: async () => "Block",
+				},
+			}),
+		)
+		expect(notifications.some((m) => m.includes("Mode: Plan"))).toBe(true)
+	})
+
+	it("null disables the cycleProfile shortcut", () => {
+		writeConfig({ shortcuts: { cycleProfile: null } })
+		permissionModesExtension(makeFakePiForExtension(pi))
+		expect(pi.shortcuts.has("alt+i")).toBe(false)
+	})
+
+	it("normalizes configured keys to lowercase before registering", () => {
+		writeConfig({ shortcuts: { cycleMode: "Ctrl+Shift+M" } })
+		permissionModesExtension(makeFakePiForExtension(pi))
+		expect(pi.shortcuts.has("ctrl+shift+m")).toBe(true)
+		expect(pi.shortcuts.has("Ctrl+Shift+M")).toBe(false)
+	})
+})

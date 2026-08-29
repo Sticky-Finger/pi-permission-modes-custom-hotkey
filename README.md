@@ -119,7 +119,7 @@ If the file doesn't exist on first install, the extension creates it for you (pr
 | Command | `/auto-depth <n>` | cap auto-mode follow-ups (`0` = unlimited; default 20) |
 | Command | `/model-profile` | show selector of available profiles |
 | Command | `/model-profile <name>` | activate the named profile (also `/model-profile list` to print them) |
-| Shortcut | `Shift+Tab` | cycle modes |
+| Shortcut | `Shift+Tab` | cycle modes (default — configurable, see below) |
 | Shortcut | `Alt+T` | cycle thinking level (off → minimal → low → medium → high → xhigh) |
 | Shortcut | `Alt+I` | cycle model profile (next profile from `~/.pi/agent/model-profiles.json`; re-applies the model for the current mode) |
 | Command | `/permissions` | list merged allow/deny/ask rules |
@@ -129,6 +129,27 @@ If the file doesn't exist on first install, the extension creates it for you (pr
 | Flag | `--model-profile <name>` | start with a named profile activated |
 
 > The start-mode flag is `--permission-mode` (not `--mode`) because pi already has a built-in `--mode` for output format (text/json/rpc).
+
+### Custom shortcuts
+
+All three shortcuts are configurable via the `shortcuts` block in `~/.pi/agent/permission-modes.json`:
+
+```json
+{
+  "shortcuts": {
+    "cycleMode": "ctrl+shift+m",
+    "cycleThinking": "alt+t",
+    "cycleProfile": "alt+i"
+  }
+}
+```
+
+- **Defaults** (when the block or a key is omitted): `cycleMode: "shift+tab"`, `cycleThinking: "alt+t"`, `cycleProfile: "alt+i"` — behavior is unchanged from previous versions.
+- Keys are normalized to lowercase before registering; set a key to `null` to disable that shortcut entirely.
+- The footer hint follows the configured `cycleMode` key.
+- Run `/reload` after editing the file for changes to take effect.
+
+> **Note — `shift+tab` conflict with pi's built-in binding.** pi binds `app.thinking.cycle` (cycle thinking level) to `shift+tab` by default and reserves it against extensions, so the default `cycleMode` key is silently dropped on stock pi. Either remap `cycleMode` to a free key as above, or free the key by adding `{"app.thinking.cycle": []}` to `~/.pi/agent/keybindings.json` (thinking-level cycling remains available on this extension's `alt+t`).
 
 ### Outside-cwd write tracking (v1.1.3)
 

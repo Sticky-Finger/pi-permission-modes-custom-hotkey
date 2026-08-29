@@ -33,6 +33,40 @@ export interface ClassifierConfig {
 	includeAgentsMd?: boolean
 }
 
+export interface ShortcutConfig {
+	/** Cycle permission mode (ask → plan → auto → bypass). Default "shift+tab". `null` disables. */
+	cycleMode: string | null
+	/** Cycle thinking level. Default "alt+t". `null` disables. */
+	cycleThinking: string | null
+	/** Cycle model profile. Default "alt+i". `null` disables. */
+	cycleProfile: string | null
+}
+
+export const DEFAULT_SHORTCUTS: Readonly<Record<keyof ShortcutConfig, string>> = {
+	cycleMode: "shift+tab",
+	cycleThinking: "alt+t",
+	cycleProfile: "alt+i",
+} as const
+
+function normalizeShortcutKey(
+	key: string | null | undefined,
+	fallback: string,
+): string | null {
+	if (key === null) return null
+	if (typeof key !== "string") return fallback
+	const normalized = key.trim().toLowerCase()
+	return normalized || null
+}
+
+export function resolveShortcuts(config: PermissionModesConfig): ShortcutConfig {
+	const s = config.shortcuts ?? {}
+	return {
+		cycleMode: normalizeShortcutKey(s.cycleMode, DEFAULT_SHORTCUTS.cycleMode),
+		cycleThinking: normalizeShortcutKey(s.cycleThinking, DEFAULT_SHORTCUTS.cycleThinking),
+		cycleProfile: normalizeShortcutKey(s.cycleProfile, DEFAULT_SHORTCUTS.cycleProfile),
+	}
+}
+
 export interface PermissionModesConfig {
 	classifier?: Partial<ClassifierConfig>
 	/** CC auto-mode classifier allow / soft_deny / environment bullets. */
@@ -42,6 +76,8 @@ export interface PermissionModesConfig {
 		deny?: string[]
 		ask?: string[]
 	}
+	/** Keyboard shortcuts. Defaults: shift+tab / alt+t / alt+i; `null` disables. */
+	shortcuts?: Partial<ShortcutConfig>
 }
 
 let _configPath = join(homedir(), ".pi", "agent", "permission-modes.json")

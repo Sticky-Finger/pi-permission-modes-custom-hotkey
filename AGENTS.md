@@ -61,9 +61,10 @@ permission-modes/             # @georgedong32/permission-modes
 | Switch model profile | `/model-profile` (selector) or `/model-profile <name>`; `/model-profile list` to print all |
 | Undo outside-cwd writes | `/undo-outside-writes` (selector, `all`, or `--list`) |
 | List outside-cwd writes | `/outside-writes` |
-| Shortcut | `Shift+Tab` to cycle modes |
-| Shortcut | `Alt+T` to cycle thinking level |
-| Shortcut | `Alt+I` to cycle through model profiles |
+| Shortcut | `Shift+Tab` to cycle modes (default; configurable) |
+| Shortcut | `Alt+T` to cycle thinking level (default; configurable) |
+| Shortcut | `Alt+I` to cycle through model profiles (default; configurable) |
+| Shortcut config | `shortcuts` block in `~/.pi/agent/permission-modes.json` (`cycleMode` / `cycleThinking` / `cycleProfile`; `null` disables; `/reload` to apply) |
 | Start flag | `pi --permission-mode <name>` |
 | Start flag | `pi --model-profile <name>` (activates a named profile) |
 | Load in dev | `pi -e ./extensions/permission-modes/index.ts` |
@@ -98,7 +99,7 @@ permission-modes/             # @georgedong32/permission-modes
 - **Do NOT** ship partial tool filtering — `resolveToolFilter()` is currently a stub that only ensures `read` is mandatory. Full configurable tool filtering (wired into `tool_call`) is planned for a future release.
 - **Do NOT** duplicate content between AGENTS.md and CLAUDE.md — keep AGENTS.md as the single source of truth
 - **Safe to delete:** `.pi/permission-modes-45ea0551.md` (recreated automatically)
-- **Invariants:** The four-mode cycle (ask → plan → auto → bypass) is hard-coded in `MODE_CYCLE`. Configured permission rules evaluate **before** mode gate (bypass exempt): deny → ask → allow. Auto uses tiered gating + optional classifier + `AUTO_RISK_PATTERNS` blacklist. Plan mode only allows writes to `plan.md`. Classifier + global permissions path: `~/.pi/agent/permission-modes.json`. Project permissions: `<cwd>/.pi/projects/<id>/permissions.json` (+ `permissions.local.json`). Model-profile path: `~/.pi/agent/model-profiles.json` (NOT `models.json`).
+- **Invariants:** The four-mode cycle (ask → plan → auto → bypass) is hard-coded in `MODE_CYCLE`. Configured permission rules evaluate **before** mode gate (bypass exempt): deny → ask → allow. Auto uses tiered gating + optional classifier + `AUTO_RISK_PATTERNS` blacklist. Plan mode only allows writes to `plan.md`. Classifier + global permissions path: `~/.pi/agent/permission-modes.json`. Project permissions: `<cwd>/.pi/projects/<id>/permissions.json` (+ `permissions.local.json`). Model-profile path: `~/.pi/agent/model-profiles.json` (NOT `models.json`). Shortcut keys resolve via `resolveShortcuts()` once at factory load (defaults `shift+tab` / `alt+t` / `alt+i`; `null` disables; keys lowercased) — pi's built-in `app.thinking.cycle` reserves `shift+tab` against extensions unless the user disables/rebinds it in `~/.pi/agent/keybindings.json`.
 
 ## Known Issues & Gotchas
 - **Test infrastructure exists** — 275 tests across `index.test.ts`, `profiles.test.ts`, `utils.test.ts`, `classifier-client.test.ts`, and permission rule modules. Always run `npm test` before committing non-trivial changes.
