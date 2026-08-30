@@ -2037,4 +2037,22 @@ describe("permission-modes extension: configurable shortcuts", () => {
 		expect(pi.shortcuts.has("ctrl+shift+m")).toBe(true)
 		expect(pi.shortcuts.has("Ctrl+Shift+M")).toBe(false)
 	})
+
+	it("refuses to register unsafe keys like ctrl+m (Enter alias) and warns", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+		try {
+			writeConfig({ shortcuts: { cycleMode: "ctrl+m" } })
+			permissionModesExtension(makeFakePiForExtension(pi))
+			// ctrl+m must not be registered (it would shadow Enter/submit), and the
+			// default cycleMode key must not silently take its place either.
+			expect(pi.shortcuts.has("ctrl+m")).toBe(false)
+			expect(pi.shortcuts.has("shift+tab")).toBe(false)
+			// The remaining safe shortcuts are unaffected.
+			expect(pi.shortcuts.has("alt+t")).toBe(true)
+			expect(pi.shortcuts.has("alt+i")).toBe(true)
+			expect(warn.mock.calls.some((c) => String(c[0]).includes("ctrl+m"))).toBe(true)
+		} finally {
+			warn.mockRestore()
+		}
+	})
 })

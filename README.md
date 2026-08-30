@@ -146,7 +146,8 @@ All three shortcuts are configurable via the `shortcuts` block in `~/.pi/agent/p
 
 - **Defaults** (when the block or a key is omitted): `cycleMode: "shift+tab"`, `cycleThinking: "alt+t"`, `cycleProfile: "alt+i"` — behavior is unchanged from previous versions.
 - Keys are normalized to lowercase before registering; set a key to `null` to disable that shortcut entirely.
-- The footer hint follows the configured `cycleMode` key.
+- **Unsafe keys are refused** (not registered) with a warning on stderr and at session start: terminal control-char aliases `ctrl+m` (= Enter/CR), `ctrl+i` (= Tab), `ctrl+j`, `ctrl+h` (= Backspace), `ctrl+[` (= Escape), the bare editor keys `tab` / `backspace` / `space`, and bare or `shift+`-prefixed single printable characters (they would shadow typing). Use a safe combo such as `ctrl+shift+m` or `alt+m` instead.
+- The footer hint follows the registered `cycleMode` key (omitted when disabled or refused).
 - Run `/reload` after editing the file for changes to take effect.
 
 > **Note — `shift+tab` conflict with pi's built-in binding.** pi binds `app.thinking.cycle` (cycle thinking level) to `shift+tab` by default and reserves it against extensions, so the default `cycleMode` key is silently dropped on stock pi. Either remap `cycleMode` to a free key as above, or free the key by adding `{"app.thinking.cycle": []}` to `~/.pi/agent/keybindings.json` (thinking-level cycling remains available on this extension's `alt+t`).

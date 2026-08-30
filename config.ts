@@ -67,6 +67,38 @@ export function resolveShortcuts(config: PermissionModesConfig): ShortcutConfig 
 	}
 }
 
+/**
+ * Keys that collide with terminal control characters or core editor keys.
+ *
+ * Terminals cannot distinguish these Ctrl combos from single-byte control
+ * chars, so pi parses them as the aliased key (e.g. ctrl+m sends CR = Enter,
+ * ctrl+i sends HT = Tab) and the extension shortcut would shadow
+ * Enter/Tab/Backspace/Escape — including message submit, which bricks the
+ * editor. "tab" / "backspace" / "space" are bare editor keys pi does not
+ * reserve against extensions.
+ */
+const UNSAFE_SHORTCUT_KEYS: ReadonlySet<string> = new Set([
+	"ctrl+m", // = Enter (CR)
+	"ctrl+i", // = Tab (HT)
+	"ctrl+j", // = LF
+	"ctrl+h", // = Backspace (BS) on most termcaps
+	"ctrl+[", // = Escape
+	"tab",
+	"backspace",
+	"space",
+])
+
+/**
+ * True when `key` must not be registered as an extension shortcut.
+ * Also rejects bare (or shift-prefixed) single printable characters, which
+ * would intercept normal typing.
+ */
+export function isUnsafeShortcutKey(key: string): boolean {
+	const k = key.trim().toLowerCase()
+	if (UNSAFE_SHORTCUT_KEYS.has(k)) return true
+	return /^(shift\+)?[a-z0-9]$/.test(k)
+}
+
 export interface PermissionModesConfig {
 	classifier?: Partial<ClassifierConfig>
 	/** CC auto-mode classifier allow / soft_deny / environment bullets. */

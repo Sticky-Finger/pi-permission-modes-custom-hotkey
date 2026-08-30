@@ -122,7 +122,38 @@ New-Item -ItemType Junction -Path "$env:USERPROFILE\.pi\agent\extensions\permiss
    会被 pi 内置 thinking 循环占用、插件注册再次被丢弃。
 7. 恢复正常使用：直接 `pi` 启动（不带 `-ne -e`）→ 加载的是 npm 2.6.3 发布版。
 
-## 5. 自动化测试
+## 5. 踩坑记录：`ctrl+m` 是 Enter 的别名（已被插件防护）
+
+实测确认的坑：把 `cycleMode` 配置为 `ctrl+m` 后，**Enter 和 ctrl+m 都会切换权限模式**，
+消息永远无法提交，pi 完全不可用。逐层根因：
+
+1. **终端层**：`ctrl+m` 与 Enter 发送的是同一个字节 `\r`（回车符 CR, 0x0D）——
+   这是终端的物理限制，任何程序都无法区分。
+2. **pi 匹配器层**：pi（0.83/0.84.4 实测）的 `matchesKey` 对 Ctrl+字母的 legacy
+   分支 `rawCtrl && data === rawCtrl` **没有** Kitty 协议门控——`rawCtrlChar("m")`
+   就是 `\r`，所以 `matchesKey("\r", "ctrl+m")` 恒为 true。pi 请求的 Kitty flags
+   为 7（不含 flag 8），Enter 在任何终端都仍发 `\r`。
+3. **分发层**：扩展快捷键在 `custom-editor.handleInput` 中**最先**检查，
+   优先于消息提交——所以 Enter 永远先命中 `ctrl+m` 快捷键。
+
+排查时的干扰项：`{"cycleMode": "ctrl+m"}` 与三键全写的配置注册出来的快捷键集合
+完全相同（未写的键回落默认值），配置内容不构成行为差异；"第二次测试正常"实际是
+当时没有专门验证 Enter 提交。**结论：`ctrl+m` 在此 pi 版本上无法作为安全快捷键，
+与终端无关。**
+
+防护方案（已实现）：`config.ts` 的 `isUnsafeShortcutKey()` 在注册前拒绝以下键，
+只输出警告、不注册，绝不让坏配置把编辑器弄瘫：
+
+- 终端控制字符别名：`ctrl+m`（Enter）、`ctrl+i`（Tab）、`ctrl+j`（LF）、
+  `ctrl+h`（Backspace）、`ctrl+[`（Escape）
+- 裸编辑器键：`tab`、`backspace`、`space`（pi 不将其列入扩展保留名单）
+- 裸字符 / `shift+` 单个可打印字符（会劫持正常输入）
+
+警告输出两路：`console.warn`（stderr）+ 会话启动时 `ctx.ui.notify`（warning，
+每次加载只提示一次）。页脚提示跟随**实际注册**的键（被拒或禁用时不显示）。
+安全键示例：`ctrl+shift+m`、`alt+m`、`f2`。
+
+## 6. 自动化测试
 
 ```bash
 cd D:\ubuntu_docs\Codes\To-Study\pi-permission-modes
@@ -141,7 +172,7 @@ npm test
   测试用 `/tmp` 路径、utils 测试断言 Unix 风格路径分隔符），已用
   `git stash` 基线对照确认与本次改动无关（基线同样 24 failed）。
 
-## 6. 已知边界
+## 7. 已知边界
 
 - 插件内不做按键冲突检测——无法感知 pi 解析后的键位表，保持扩展边界；
   与 pi 内置键冲突时仍由 pi 的保留名单机制裁决（启动警告可见）。

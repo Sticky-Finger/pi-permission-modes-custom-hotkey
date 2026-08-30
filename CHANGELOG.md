@@ -1,7 +1,10 @@
 ## [Unreleased]
 
 ### Added
-- **Configurable shortcuts**: new `shortcuts` block in `~/.pi/agent/permission-modes.json` (`cycleMode` / `cycleThinking` / `cycleProfile`). Defaults unchanged (`shift+tab` / `alt+t` / `alt+i`); keys are lowercased before registering, `null` disables a shortcut, and the footer hint follows the configured `cycleMode` key. Lets users remap off pi's reserved `shift+tab` (`app.thinking.cycle`), which silently drops extension shortcuts bound to it.
+- **Configurable shortcuts**: new `shortcuts` block in `~/.pi/agent/permission-modes.json` (`cycleMode` / `cycleThinking` / `cycleProfile`). Defaults unchanged (`shift+tab` / `alt+t` / `alt+i`); keys are lowercased before registering, `null` disables a shortcut, and the footer hint follows the registered `cycleMode` key. Lets users remap off pi's reserved `shift+tab` (`app.thinking.cycle`), which silently drops extension shortcuts bound to it.
+
+### Fixed
+- **Unsafe shortcut keys are refused**: configuring a terminal control-char alias (`ctrl+m` = Enter/CR, `ctrl+i` = Tab, `ctrl+j`, `ctrl+h` = Backspace, `ctrl+[` = Escape), a bare editor key (`tab` / `backspace` / `space`), or a bare / `shift+`-prefixed single printable character no longer registers it. These keys shadow message submit or editing: terminals send the same byte for `ctrl+m` and Enter (`\r`), pi's matcher accepts `\r` for `ctrl+letter` unconditionally, and extension shortcuts dispatch before everything else — so `cycleMode: "ctrl+m"` made Enter cycle modes and pi unusable. Unsafe keys are skipped with a console warning plus a session-start notification.
 
 ## [2.6.3] - 2026-08-02
 

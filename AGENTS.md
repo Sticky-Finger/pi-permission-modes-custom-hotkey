@@ -103,6 +103,7 @@ permission-modes/             # @georgedong32/permission-modes
 
 ## Known Issues & Gotchas
 - **Test infrastructure exists** — 275 tests across `index.test.ts`, `profiles.test.ts`, `utils.test.ts`, `classifier-client.test.ts`, and permission rule modules. Always run `npm test` before committing non-trivial changes.
+- **Unsafe shortcut keys** — `isUnsafeShortcutKey()` (config.ts) refuses keys that collide with terminal control characters (`ctrl+m` = Enter/CR, `ctrl+i` = Tab, `ctrl+j`, `ctrl+h` = Backspace, `ctrl+[` = Escape) or bare editor/typing keys (`tab`, `backspace`, `space`, bare or `shift+` single printable chars): pi matches `\r` for `ctrl+letter` unconditionally and dispatches extension shortcuts first, so registering e.g. `ctrl+m` hijacks Enter and bricks message submit. Never bypass this guard in `registerConfiguredShortcut()`.
 - **Snapshot cap at 100:** Long-running sessions in bypass mode that touch >100 outside-cwd paths will LRU-evict oldest snapshots.
 - The `--permission-mode` flag uses a distinct name because pi has a built-in `--mode` flag for output format (text/json/rpc). Do not rename it to `--mode`.
 - Auto mode **does not** send per-turn Continue follow-ups (removed in v2.0.0).

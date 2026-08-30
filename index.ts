@@ -31,6 +31,7 @@ import {
   buildYoloRejectionMessage,
 } from "./classifier-messages.ts";
 import {
+  isUnsafeShortcutKey,
   loadPermissionModesConfig,
   resolveAutoModeConfig,
   resolveClassifierConfig,
@@ -798,7 +799,8 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
         const cwdW = visibleWidth(cwdText);
         const ctxW = visibleWidth(ctxStr);
         const modelW = visibleWidth(modelStr);
-        const modeText = `${m.icon} ${m.label}${SHORTCUTS.cycleMode ? ` (${SHORTCUTS.cycleMode})` : ""}`;
+        const cycleModeKey = registeredShortcuts.cycleMode;
+        const modeText = `${m.icon} ${m.label}${cycleModeKey ? ` (${cycleModeKey})` : ""}`;
         const modeW = visibleWidth(modeText);
 
         // Wide: line1 = cwd(L) + context(centered) + model(R), line2 = mode
@@ -1394,12 +1396,40 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
   });
 
 
-  if (SHORTCUTS.cycleMode) {
-    pi.registerShortcut(SHORTCUTS.cycleMode, {
-      description: "Cycle mode: Ask → Plan → Auto → Bypass",
-      handler: async (ctx) => cycleMode(ctx),
-    });
+  // Configured shortcut registration. Unsafe keys — terminal control-char
+  // aliases like ctrl+m (= Enter/CR: the terminal sends \r for both, and pi's
+  // matcher accepts \r for ctrl+letter unconditionally) or bare editor keys —
+  // are refused instead of registered, so a bad config can never shadow
+  // message submit or editing. Warnings go to stderr and surface once in the
+  // session UI at startup.
+  type ShortcutField = "cycleMode" | "cycleThinking" | "cycleProfile";
+  const registeredShortcuts: Partial<Record<ShortcutField, string>> = {};
+  const shortcutWarnings: string[] = [];
+  let shortcutWarningsShown = false;
+  function registerConfiguredShortcut(
+    field: ShortcutField,
+    key: string | null,
+    def: { description: string; handler: (ctx: ExtensionContext) => Promise<void> | void },
+  ): void {
+    if (!key) return;
+    if (isUnsafeShortcutKey(key)) {
+      const msg =
+        `Shortcut "${key}" (shortcuts.${field}) was not registered: it collides with ` +
+        `a terminal control character or editor key (e.g. ctrl+m sends Enter/CR, ` +
+        `ctrl+i sends Tab) and would shadow message submit / editing. ` +
+        `Pick a safe key such as ctrl+shift+m or alt+m.`;
+      shortcutWarnings.push(msg);
+      console.warn(`[permission-modes] ${msg}`);
+      return;
+    }
+    registeredShortcuts[field] = key;
+    pi.registerShortcut(key, def);
   }
+
+  registerConfiguredShortcut("cycleMode", SHORTCUTS.cycleMode, {
+    description: "Cycle mode: Ask → Plan → Auto → Bypass",
+    handler: async (ctx) => cycleMode(ctx),
+  });
 
   // Alt+T: cycle the thinking level. pi has no built-in cycle helper, and setThinkingLevel
   // clamps to the model's capabilities, so we advance to the next level the model actually
@@ -1440,13 +1470,11 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
       );
   }
 
-  if (SHORTCUTS.cycleThinking) {
-    pi.registerShortcut(SHORTCUTS.cycleThinking, {
-      description:
-        "Cycle thinking level (off → minimal → low → medium → high → xhigh)",
-      handler: async (ctx) => cycleThinkingLevel(ctx),
-    });
-  }
+  registerConfiguredShortcut("cycleThinking", SHORTCUTS.cycleThinking, {
+    description:
+      "Cycle thinking level (off → minimal → low → medium → high → xhigh)",
+    handler: async (ctx) => cycleThinkingLevel(ctx),
+  });
 
   // Alt+I: cycle through model profiles defined in `~/.pi/agent/model-profiles.json`.
   // Mirrors Shift+Tab's cycle-by-one behavior: starts at the profile after the
@@ -1475,13 +1503,11 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
     await setActiveProfile(next, ctx);
   }
 
-  if (SHORTCUTS.cycleProfile) {
-    pi.registerShortcut(SHORTCUTS.cycleProfile, {
-      description:
-        "Cycle model profile (next profile from ~/.pi/agent/model-profiles.json)",
-      handler: async (ctx) => cycleProfile(ctx),
-    });
-  }
+  registerConfiguredShortcut("cycleProfile", SHORTCUTS.cycleProfile, {
+    description:
+      "Cycle model profile (next profile from ~/.pi/agent/model-profiles.json)",
+    handler: async (ctx) => cycleProfile(ctx),
+  });
 
   // NB: pi has a built-in `--mode` (output mode: text/json/rpc), so the start-mode
   // flag must use a distinct name to avoid being shadowed at parse time.
@@ -1994,6 +2020,11 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
     _event: unknown,
     ctx: ExtensionContext,
   ): Promise<void> {
+    if (!shortcutWarningsShown && shortcutWarnings.length && ctx.hasUI) {
+      shortcutWarningsShown = true;
+      for (const w of shortcutWarnings) ctx.ui.notify(w, "warning");
+    }
+
     // Ensure the model profiles config exists (creates ~/.pi/agent if missing
     // and writes a default file with the user's default model detected from
     // settings.json). Re-runs on /reload so a user-deleted file is recreated.
