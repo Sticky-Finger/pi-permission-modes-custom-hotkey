@@ -38,14 +38,11 @@ export interface ShortcutConfig {
 	cycleMode: string | null
 	/** Cycle thinking level. Default "alt+t". `null` disables. */
 	cycleThinking: string | null
-	/** Cycle model profile. Default "alt+i". `null` disables. */
-	cycleProfile: string | null
 }
 
 export const DEFAULT_SHORTCUTS: Readonly<Record<keyof ShortcutConfig, string>> = {
 	cycleMode: "shift+tab",
 	cycleThinking: "alt+t",
-	cycleProfile: "alt+i",
 } as const
 
 function normalizeShortcutKey(
@@ -63,7 +60,6 @@ export function resolveShortcuts(config: PermissionModesConfig): ShortcutConfig 
 	return {
 		cycleMode: normalizeShortcutKey(s.cycleMode, DEFAULT_SHORTCUTS.cycleMode),
 		cycleThinking: normalizeShortcutKey(s.cycleThinking, DEFAULT_SHORTCUTS.cycleThinking),
-		cycleProfile: normalizeShortcutKey(s.cycleProfile, DEFAULT_SHORTCUTS.cycleProfile),
 	}
 }
 
@@ -108,7 +104,7 @@ export interface PermissionModesConfig {
 		deny?: string[]
 		ask?: string[]
 	}
-	/** Keyboard shortcuts. Defaults: shift+tab / alt+t / alt+i; `null` disables. */
+	/** Keyboard shortcuts. Defaults: shift+tab / alt+t; `null` disables. */
 	shortcuts?: Partial<ShortcutConfig>
 }
 

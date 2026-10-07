@@ -70,7 +70,6 @@ import {
   ensurePlanFile,
   extractPlanSection,
   extractTodoItems,
-  filterSkillsFromPrompt,
   filterSubstantivePlanItems,
   findProjectRoot,
   formatCount,
@@ -117,31 +116,8 @@ import {
   applyInheritedModeForChild,
   publishInheritedPermissionMode,
 } from "./mode-inherit.ts";
-import {
-  ensureModelProfilesConfig,
-  getActiveProfileName,
-  listProfiles,
-  loadModelProfiles,
-  parseModelId,
-  profileExists,
-  resolveEffortForMode,
-  resolveModelForMode,
-  resolveSkillFilter,
-  type ModelProfile,
-  type ModelProfilesConfig,
-} from "./profiles.ts";
 
 type Mode = PermissionMode;
-
-/** Effort / thinking levels accepted in model-profiles.json. */
-const PROFILE_EFFORT_LEVELS = new Set([
-  "off",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-]);
 
 const MODE_CYCLE: Mode[] = ["ask", "plan", "auto", "bypass"];
 
@@ -206,14 +182,6 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
     applyAutoModePermissionStrip();
   }
 
-  // ---- model-profile state -----------------------------------------------
-  // activeProfile === undefined means "no profile active" — the extension
-  // works as before (no auto model switching). The /model-profile command and
-  // --model-profile flag set this; persistState() persists it; session_start
-  // restores it and re-applies the model.
-  let activeProfile: string | undefined = undefined;
-  let modelProfileConfig: ModelProfilesConfig = {};
-
   // streaming stats (for the working-indicator readout)
   let streamStart = 0;
   let outputAtStart = 0;
@@ -237,7 +205,6 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
   function persistState(): void {
     pi.appendEntry("modes", {
       currentMode,
-      activeProfile,
       planPhase,
       planExecuting,
       planTodos,
@@ -652,7 +619,6 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
 
     applyToolRestrictions();
     updateStatus(ctx);
-    await applyProfileModelForMode(mode, ctx);
     persistState();
     publishInheritedPermissionMode(mode);
   }
@@ -661,99 +627,6 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
     const idx = MODE_CYCLE.indexOf(currentMode);
     void setMode(MODE_CYCLE[(idx + 1) % MODE_CYCLE.length], ctx);
     if (ctx.hasUI) ctx.ui.notify(`Mode: ${MODE_META[currentMode].label}`);
-  }
-
-  // ---- model profile logic ----------------------------------------------
-  /**
-   * Switch the active model to match the one defined in `activeProfile` for
-   * the given mode. No-op when no profile is active or when the profile has
-   * no mapping for the mode. All failures log a notification and keep the
-   * current model — never throw, never block the user.
-   */
-  async function applyProfileModelForMode(
-    mode: Mode,
-    ctx: ExtensionContext,
-  ): Promise<void> {
-    // Lazy first-time activation: if nothing has been activated but a
-    // config file exists on disk, try to pick up the user's `active` profile
-    // (or the `default` profile) so mode switches "just work".
-    if (activeProfile === undefined) {
-      const cfg = loadModelProfiles();
-      if (Object.keys(cfg).length === 0) return;
-      const candidate = cfg.active || "default";
-      if (!profileExists(cfg, candidate)) return;
-      activeProfile = candidate;
-      modelProfileConfig = cfg;
-    }
-
-    // Re-load lazily to pick up external edits between mode switches.
-    // Then re-stamp `active` with the in-memory `activeProfile` so the
-    // shared `resolveModelForMode()` helper (which reads `config.active`)
-    // honors any in-memory profile switches done via `/model-profile` or
-    // Alt+I — the on-disk file is NOT modified here.
-    const reloaded = loadModelProfiles();
-    modelProfileConfig =
-      activeProfile !== undefined && reloaded.active !== activeProfile
-        ? { ...reloaded, active: activeProfile }
-        : reloaded;
-
-    const modelId = resolveModelForMode(modelProfileConfig, mode);
-    if (!modelId) return; // profile has no mapping for this mode — keep current model
-
-    const parsed = parseModelId(modelId);
-    if (!parsed) {
-      if (ctx.hasUI)
-        ctx.ui.notify(
-          `Invalid model ID "${modelId}" in profile "${activeProfile}"`,
-          "warning",
-        );
-      return;
-    }
-
-    const model = ctx.modelRegistry.find(parsed.provider, parsed.model);
-    if (!model) {
-      if (ctx.hasUI)
-        ctx.ui.notify(`Model "${modelId}" not found in registry`, "warning");
-      return;
-    }
-
-    const success = await pi.setModel(model);
-    if (!success) {
-      if (ctx.hasUI)
-        ctx.ui.notify(`No API key available for "${modelId}"`, "warning");
-      return;
-    }
-
-    const effort = resolveEffortForMode(modelProfileConfig, mode);
-    if (!effort) return;
-    if (!PROFILE_EFFORT_LEVELS.has(effort)) {
-      if (ctx.hasUI)
-        ctx.ui.notify(
-          `Unknown effort "${effort}" in profile "${activeProfile}" (expected: ${[...PROFILE_EFFORT_LEVELS].join(", ")})`,
-          "warning",
-        );
-      return;
-    }
-    if (typeof pi.setThinkingLevel === "function") {
-      pi.setThinkingLevel(effort as any);
-    }
-  }
-
-  async function setActiveProfile(
-    name: string,
-    ctx: ExtensionContext,
-  ): Promise<void> {
-    const config = loadModelProfiles();
-    if (!profileExists(config, name)) {
-      if (ctx.hasUI) ctx.ui.notify(`Unknown profile "${name}"`, "error");
-      return;
-    }
-    activeProfile = name;
-    modelProfileConfig = config;
-    await applyProfileModelForMode(currentMode, ctx);
-    updateStatus(ctx);
-    persistState();
-    if (ctx.hasUI) ctx.ui.notify(`Profile "${name}" activated`, "info");
   }
 
   // ---- UI: status, footer, plan widget, working stats --------------------
@@ -792,10 +665,6 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
               : undefined;
           if (thinking) modelStr += ` • ${thinking}`;
         }
-        if (activeProfile) {
-          modelStr = `profile:${activeProfile} · ${modelStr}`;
-        }
-
         const cwdW = visibleWidth(cwdText);
         const ctxW = visibleWidth(ctxStr);
         const modelW = visibleWidth(modelStr);
@@ -1038,7 +907,6 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
       updateStatus(ctx);
       updatePlanWidget(ctx);
       persistState();
-      await applyProfileModelForMode("auto", ctx);
       const steps = planTodos.map((t) => `${t.step}. ${t.text}`).join("\n");
       pi.sendMessage(
         {
@@ -1151,7 +1019,6 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
         applyToolRestrictions();
         updateStatus(ctx);
         persistState();
-        await applyProfileModelForMode("auto", ctx);
         const steps = planTodos.map((t) => `${t.step}. ${t.text}`).join("\n");
         pi.sendMessage(
           {
@@ -1186,68 +1053,6 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
       return new Text(theme.fg("muted", truncateToWidth(String(first?.text ?? ""), 80)), 0, 0);
     },
   }));
-
-  // ---- /model-profile command -------------------------------------------
-  // Show, list, or activate a model profile from `~/.pi/agent/model-profiles.json`.
-  pi.registerCommand("model-profile", {
-    description:
-      "Show or set model profile (named set of per-mode models from ~/.pi/agent/model-profiles.json)",
-    handler: async (args, ctx) => {
-      const arg = (args ?? "").trim();
-
-      if (!arg) {
-        // No args → show interactive selector
-        const config = loadModelProfiles();
-        const names = listProfiles(config);
-        if (!names.length) {
-          if (ctx.hasUI)
-            ctx.ui.notify(
-              "No profiles found in ~/.pi/agent/model-profiles.json",
-              "warning",
-            );
-          return;
-        }
-        if (!ctx.hasUI) return;
-        const choice = await ctx.ui.select("Select model profile:", names);
-        if (!choice) return;
-        await setActiveProfile(choice, ctx);
-        return;
-      }
-
-      if (arg === "list") {
-        const config = loadModelProfiles();
-        const names = listProfiles(config);
-        if (!names.length) {
-          if (ctx.hasUI)
-            ctx.ui.notify(
-              "No profiles found in ~/.pi/agent/model-profiles.json",
-              "info",
-            );
-          return;
-        }
-        const activeName = getActiveProfileName(config);
-        const lines = names.map((n) => {
-          const p = config[n] as ModelProfile;
-          const mappings = ["ask", "plan", "auto", "bypass"]
-            .map((m) => `${m}:${(p as any)[m] || "-"}`)
-            .join(" ");
-          const active = n === activeName ? " (active)" : "";
-          return `${n}${active}: ${mappings}`;
-        });
-        pi.sendMessage(
-          {
-            customType: "model-profile-list",
-            content: `Model profiles:\n${lines.join("\n")}`,
-            display: true,
-          },
-          { triggerTurn: false },
-        );
-        return;
-      }
-
-      await setActiveProfile(arg, ctx);
-    },
-  });
 
   // ---- /outside-writes + /undo-outside-writes (NEW v1.1.3) --------------
   // Format a snapshot for display in lists/selectors.
@@ -1402,7 +1207,7 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
   // are refused instead of registered, so a bad config can never shadow
   // message submit or editing. Warnings go to stderr and surface once in the
   // session UI at startup.
-  type ShortcutField = "cycleMode" | "cycleThinking" | "cycleProfile";
+  type ShortcutField = "cycleMode" | "cycleThinking";
   const registeredShortcuts: Partial<Record<ShortcutField, string>> = {};
   const shortcutWarnings: string[] = [];
   let shortcutWarningsShown = false;
@@ -1476,39 +1281,6 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
     handler: async (ctx) => cycleThinkingLevel(ctx),
   });
 
-  // Alt+I: cycle through model profiles defined in `~/.pi/agent/model-profiles.json`.
-  // Mirrors Shift+Tab's cycle-by-one behavior: starts at the profile after the
-  // currently active one and wraps. Falls back to the first profile when no
-  // profile is active yet. Always re-applies the model for the current mode,
-  // so the UI (footer) updates immediately.
-  async function cycleProfile(ctx: ExtensionContext): Promise<void> {
-    const config = loadModelProfiles();
-    const names = listProfiles(config);
-    if (!names.length) {
-      if (ctx.hasUI)
-        ctx.ui.notify(
-          "No profiles found in ~/.pi/agent/model-profiles.json",
-          "warning",
-        );
-      return;
-    }
-    // Determine the index of the next profile. If no profile is active yet,
-    // we treat the current `config.active` (or "default") as the implicit one
-    // so cycling always advances.
-    const currentName =
-      activeProfile ?? getActiveProfileName(config) ?? names[0]!;
-    let i = names.indexOf(currentName);
-    if (i < 0) i = -1; // unknown current → start before the first
-    const next = names[(i + 1) % names.length]!;
-    await setActiveProfile(next, ctx);
-  }
-
-  registerConfiguredShortcut("cycleProfile", SHORTCUTS.cycleProfile, {
-    description:
-      "Cycle model profile (next profile from ~/.pi/agent/model-profiles.json)",
-    handler: async (ctx) => cycleProfile(ctx),
-  });
-
   // NB: pi has a built-in `--mode` (output mode: text/json/rpc), so the start-mode
   // flag must use a distinct name to avoid being shadowed at parse time.
   pi.registerFlag("permission-mode", {
@@ -1516,12 +1288,6 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
       "Start in a permission mode: ask, plan, auto, or bypass (accepts 'default' as alias for 'ask')",
     type: "string",
     default: "ask",
-  });
-
-  pi.registerFlag("model-profile", {
-    description:
-      "Start with a named model profile from ~/.pi/agent/model-profiles.json",
-    type: "string",
   });
 
   /** Simple glob-style pattern matching for autoMode.allow / soft_deny rules. */
@@ -1823,24 +1589,7 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
       }
     }
 
-    const skillFilter = resolveSkillFilter(modelProfileConfig, currentMode);
-    let workingPrompt = systemPromptBase;
-    if (skillFilter.length !== 1 || skillFilter[0] !== "*") {
-      if (workingPrompt) {
-        const filtered = filterSkillsFromPrompt(workingPrompt, skillFilter);
-        if (
-          skillFilter.length > 0 &&
-          filtered === workingPrompt &&
-          workingPrompt.includes("<skill")
-        ) {
-          console.warn(
-            `[permission-modes] Skill filter for mode "${currentMode}" was a no-op ` +
-              `(${skillFilter.length} skill(s) requested: ${skillFilter.join(", ")}).`,
-          );
-        }
-        workingPrompt = filtered;
-      }
-    }
+    const workingPrompt = systemPromptBase;
 
     const anchored = injectModePrompt(workingPrompt, modeBlock);
     const withInjection =
@@ -1992,7 +1741,6 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
       updateStatus(ctx);
       updatePlanWidget(ctx);
       persistState();
-      await applyProfileModelForMode("auto", ctx);
       const steps = planTodos.map((t) => `${t.step}. ${t.text}`).join("\n");
       pi.sendMessage(
         {
@@ -2025,32 +1773,12 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
       for (const w of shortcutWarnings) ctx.ui.notify(w, "warning");
     }
 
-    // Ensure the model profiles config exists (creates ~/.pi/agent if missing
-    // and writes a default file with the user's default model detected from
-    // settings.json). Re-runs on /reload so a user-deleted file is recreated.
-    modelProfileConfig = ensureModelProfilesConfig();
-
     const flag = pi.getFlag("permission-mode");
     if (typeof flag === "string") {
       if ((MODE_CYCLE as string[]).includes(flag)) {
         currentMode = flag as Mode;
       } else if (flag === "default" || flag === "accept-edits") {
         currentMode = "ask";
-      }
-    }
-
-    // --model-profile <name>: validate and activate the named profile.
-    const profileFlag = pi.getFlag("model-profile");
-    if (typeof profileFlag === "string" && profileFlag) {
-      const config = loadModelProfiles();
-      if (profileExists(config, profileFlag)) {
-        activeProfile = profileFlag;
-        modelProfileConfig = config;
-      } else if (ctx.hasUI) {
-        ctx.ui.notify(
-          `Unknown profile "${profileFlag}". Available: ${listProfiles(config).join(", ") || "(none)"}`,
-          "warning",
-        );
       }
     }
 
@@ -2074,8 +1802,6 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
           planTodos = last.data.planTodos as TodoItem[];
         if (typeof last.data.lastExtractedPlanHash === "string")
           lastExtractedPlanHash = last.data.lastExtractedPlanHash;
-        if (typeof last.data.activeProfile === "string")
-          activeProfile = last.data.activeProfile;
       }
     } catch {
       /* ignore */
@@ -2119,12 +1845,6 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
     if (ctx.hasUI) {
       installFooter(ctx);
       updateStatus(ctx);
-    }
-
-    // If a profile was activated (via flag or persisted state), apply its
-    // model mapping for the current mode.
-    if (activeProfile) {
-      await applyProfileModelForMode(currentMode, ctx);
     }
 
     startPermissionForwardingPoller(ctx);

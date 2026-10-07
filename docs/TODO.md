@@ -10,7 +10,7 @@
   - 分支：`feat/configurable-shortcuts`（已提交，未推送远程，待用户推到 fork）
   - 状态：✅ 编码实现完成，新增 12 个测试全部通过（Windows 基线上既有的 24 个失败与本次改动无关，已用基线对照确认）
 
-- [ ] [Refactor] 彻底移除 model-profile 功能（切权限模式不再切换模型与思考强度；v3.0.0）
+- [x] [Refactor] 彻底移除 model-profile 功能（切权限模式不再切换模型与思考强度；v3.0.0）
   - 实现计划：[docs/plan/20261007-1840-remove-model-profiles.md](plan/20261007-1840-remove-model-profiles.md)
   - 分支：`feat/remove-model-profiles`（自 `feat/configurable-shortcuts` 最新提交 `d038ffc` 切出）
-  - 状态：📋 计划待审阅（审阅通过后开始编码）
+  - 状态：✅ 编码实现完成，298 个测试全部通过（含修复一个在 pi 会话内跑套件时暴露的 mode-inherit 测试隔离问题）；待推送远程（fork + origin）
