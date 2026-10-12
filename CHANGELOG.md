@@ -1,3 +1,14 @@
+## [Unreleased]
+
+### Changed
+- **Single-file bundled artifact (`dist/index.js`)** — pi now loads one prebuilt, minified 83 kB file (29 kB gzip) instead of transpiling 22 TypeScript modules (203 kB) on every session start. Plan: [docs/plan/20261007-2115-dist-bundle.md](docs/plan/20261007-2115-dist-bundle.md).
+  - `pi.extensions` now points at `./dist/index.js`; the npm tarball ships only `dist/` + docs (no loose `.ts` files).
+  - The two classifier prompt texts are inlined at build time (`?raw` imports), removing the runtime file read — `classifier-prompts/*.txt` remain the source of truth in the repo.
+  - **Zero runtime dependencies, by construction**: build gates fail the build if the bundle imports anything outside `node:*` / peer / `@earendil-works/*`, if third-party code is inlined without being registered in `INLINED_THIRD_PARTY`, or if it exceeds the 90 kB / 32 kB-gzip budget.
+  - **Byte-stable artifact**: esbuild is pinned to an exact version (`0.28.2`) and `dist.test.ts` verifies a fresh rebuild matches the committed file byte-for-byte — an audited bundle stays byte-identical across installs (pi updates git packages via `git reset --hard`; no build ever runs in the install dir).
+  - `dist/` is committed (git installs would otherwise silently skip the extension — pi never runs builds for git sources) and marked `linguist-generated` in `.gitattributes`.
+- **`package-lock.json` is now committed** (was gitignored) — the dev dependency tree is pinned with integrity hashes; install with `npm ci` and review lock diffs when changing dependencies.
+
 ## [3.0.0] - 2026-10-07
 
 ### Removed (breaking)
