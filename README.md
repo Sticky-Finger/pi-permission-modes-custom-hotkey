@@ -156,19 +156,31 @@ Current mode and the auto-follow-up depth **persist** across `/reload` and sessi
 pi install npm:@georgedong32/permission-modes
 pi list                                            # verify it loaded
 
-# Or run it directly for a quick try (no install)
-pi -e ./extensions/permission-modes/index.ts
+# Or run it directly for a quick try (no install; loads the built bundle)
+pi -e ./extensions/permission-modes/dist/index.js
 
 # During development, hot-reload after edits
 /reload
 ```
 
-Auto-discovery also works: drop this folder at `~/.pi/agent/extensions/permission-modes/` (global) or `.pi/extensions/permission-modes/` (project) and pi loads `index.ts` automatically.
+Auto-discovery also works: drop this folder at `~/.pi/agent/extensions/permission-modes/` (global) or `.pi/extensions/permission-modes/` (project) — pi reads `pi.extensions` from `package.json` and loads `dist/index.js`.
+
+## Build
+
+pi loads the prebuilt single-file bundle `dist/index.js` (zero runtime dependencies — every third-party import would be either inlined and registered, or rejected by the build gates). Source lives in the repo's TypeScript modules; rebuild after editing them and commit the result:
+
+```bash
+npm run build                # bundle + gates: import whitelist, inlined inventory, size budget
+npm run build -- --no-minify # readable build for debugging (do not commit)
+npm run build -- --report    # print the module inventory (what got bundled, sizes)
+```
+
+`dist.test.ts` fails when the committed bundle is stale, imports a non-host package, or exceeds the size budget.
 
 ## Testing
 
 ```bash
-npm test                # run all tests (vitest)
+npm test                # run all tests (vitest), including the dist artifact guards
 npm run test:watch      # watch mode for development
 ```
 
@@ -180,15 +192,18 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
 ```
 permission-modes/             # @georgedong32/permission-modes
-├── package.json              # pi manifest + npm package metadata
-├── index.ts                  # main extension (default-exported factory)
+├── package.json              # pi manifest (pi.extensions → dist/index.js) + npm metadata
+├── package-lock.json         # dev dependency tree, committed (exact versions + integrity)
+├── index.ts                  # main extension source (default-exported factory)
 ├── utils.ts                  # bash allowlist + Plan: + [DONE:n] helpers
-├── index.test.ts             # integration tests (vitest)
-├── utils.test.ts             # unit tests (vitest)
+├── scripts/build.js          # esbuild bundler + build gates (single-file dist)
+├── dist/index.js             # COMMITTED build artifact — what pi actually loads
+├── types/raw.d.ts            # editor types for `*.txt?raw` imports
+├── *.test.ts                 # tests (vitest), incl. dist.test.ts artifact guards
 ├── vitest.config.ts          # vitest config
 ├── CHANGELOG.md              # release history
 ├── LICENSE                   # MIT
-├── .gitignore                # excludes node_modules, lockfile, .pi/
+├── .gitignore                # excludes node_modules, .pi/ artifacts (lock is committed)
 └── docs/
     ├── PRD.md                # product requirements
     └── prompts/              # mode-specific prompt context
@@ -197,4 +212,4 @@ permission-modes/             # @georgedong32/permission-modes
         └── auto-mode-prompts.md
 ```
 
-Third-party deps: none. Peer dependencies (bundled by pi): `@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, `@earendil-works/pi-tui`, `typebox`. **Switching permission modes never calls `setModel` / `setThinkingLevel`** — the extension only gates tool-call approvals.
+Runtime third-party deps: **none** — the shipped `dist/index.js` is a single self-contained file (83 kB / 29 kB gzip) that only imports `node:*` builtins and the pi host packages, which pi provides as virtual modules (peer dependencies: `@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, `@earendil-works/pi-tui`, `typebox`). Build tooling (esbuild, vitest) is dev-only and pinned by the committed lockfile. **Switching permission modes never calls `setModel` / `setThinkingLevel`** — the extension only gates tool-call approvals.
