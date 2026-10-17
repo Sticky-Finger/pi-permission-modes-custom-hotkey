@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
 	buildClassifierSystemPrompt,
-	clearClassifierPromptCache,
 	getDefaultAutoModeRules,
 } from "./classifier-prompt.ts"
 
@@ -24,7 +23,6 @@ describe("buildClassifierSystemPrompt", () => {
 	})
 
 	it("getDefaultAutoModeRules extracts bullets from template", () => {
-		clearClassifierPromptCache()
 		const defaults = getDefaultAutoModeRules()
 		expect(defaults.allow?.length).toBeGreaterThan(5)
 		expect(defaults.soft_deny?.length).toBeGreaterThan(5)

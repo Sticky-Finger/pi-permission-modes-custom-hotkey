@@ -21,7 +21,6 @@ describe("resolveShortcuts", () => {
 		expect(resolveShortcuts({})).toEqual({
 			cycleMode: "shift+tab",
 			cycleThinking: "alt+t",
-			cycleProfile: "alt+i",
 		})
 	})
 
@@ -36,7 +35,6 @@ describe("resolveShortcuts", () => {
 		})
 		expect(resolved.cycleMode).toBe("ctrl+shift+m")
 		expect(resolved.cycleThinking).toBe("alt+t")
-		expect(resolved.cycleProfile).toBe("alt+i")
 	})
 
 	it("normalizes case and surrounding whitespace", () => {
@@ -49,9 +47,9 @@ describe("resolveShortcuts", () => {
 
 	it("null disables a shortcut", () => {
 		const resolved = resolveShortcuts({
-			shortcuts: { cycleProfile: null },
+			shortcuts: { cycleThinking: null },
 		})
-		expect(resolved.cycleProfile).toBeNull()
+		expect(resolved.cycleThinking).toBeNull()
 		expect(resolved.cycleMode).toBe("shift+tab")
 	})
 

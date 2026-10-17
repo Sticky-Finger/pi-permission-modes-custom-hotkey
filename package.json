@@ -1,6 +1,6 @@
 {
   "name": "@georgedong32/permission-modes",
-  "version": "2.6.3",
+  "version": "3.1.0",
   "type": "module",
   "description": "Claude-Code-style permission modes (ask / plan / auto) for the pi coding agent — with per-mode model profiles, outside-cwd write tracking, and per-mode skill filtering.",
   "keywords": [
@@ -20,29 +20,31 @@
     "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
+    "build": "node scripts/build.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepublishOnly": "node -e \"const pkg=require('./package.json'); if(!pkg.files||pkg.files.length===0){console.error('files field empty — abort');process.exit(1)}; console.log('Publishing '+pkg.name+'@'+pkg.version+' with files:', pkg.files)\"",
+    "prepublishOnly": "npm run build && node -e \"const pkg=require('./package.json'); if(!pkg.files||pkg.files.length===0){console.error('files field empty — abort');process.exit(1)}; console.log('Publishing '+pkg.name+'@'+pkg.version+' with files:', pkg.files)\"",
     "pack:dry": "npm pack --dry-run"
   },
   "pi": {
     "extensions": [
-      "./index.ts"
+      "./dist/index.js"
     ]
   },
   "files": [
-    "*.ts",
-    "classifier-prompts/**",
+    "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*",
     "typebox": "*"
   },
   "devDependencies": {
+    "esbuild": "0.28.2",
     "vitest": "^1.6.0"
   }
 }

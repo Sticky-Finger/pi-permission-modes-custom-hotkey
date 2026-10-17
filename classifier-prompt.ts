@@ -3,14 +3,8 @@
  * Prompt text from Claude Code yolo-classifier-prompts (external build).
  */
 
-import { readFileSync } from "node:fs"
-import { dirname, join } from "node:path"
-import { fileURLToPath } from "node:url"
-
-const PROMPTS_DIR = join(
-	dirname(fileURLToPath(import.meta.url)),
-	"classifier-prompts",
-)
+import basePromptText from "./classifier-prompts/auto_mode_system_prompt.txt?raw"
+import permissionsTemplateText from "./classifier-prompts/permissions_external.txt?raw"
 
 export type AutoModeRules = {
 	allow?: string[]
@@ -18,31 +12,12 @@ export type AutoModeRules = {
 	environment?: string[]
 }
 
-let basePromptCache: string | undefined
-let permissionsTemplateCache: string | undefined
-
-function loadPromptFile(name: string): string {
-	return readFileSync(join(PROMPTS_DIR, name), "utf-8")
-}
-
 export function getBaseClassifierPrompt(): string {
-	if (!basePromptCache) {
-		basePromptCache = loadPromptFile("auto_mode_system_prompt.txt")
-	}
-	return basePromptCache
+	return basePromptText
 }
 
 export function getExternalPermissionsTemplate(): string {
-	if (!permissionsTemplateCache) {
-		permissionsTemplateCache = loadPromptFile("permissions_external.txt")
-	}
-	return permissionsTemplateCache
-}
-
-/** For tests — reset cached prompt reads. */
-export function clearClassifierPromptCache(): void {
-	basePromptCache = undefined
-	permissionsTemplateCache = undefined
+	return permissionsTemplateText
 }
 
 const CC_TOOL_OUTPUT_LINE =

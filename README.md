@@ -80,35 +80,9 @@ Example global config:
 
 When a tool call would prompt, you can choose **Allow always (this project)** or **Allow always (global)** to persist an allow rule. Use `/permissions` to list the merged rule set.
 
-## Model profiles (v1.1.1)
+## Model & thinking
 
-Define named profiles in `~/.pi/agent/model-profiles.json` mapping each mode to a **model + effort** pair. Each mode entry can be a bare model string, or a `ModeConfig` object:
-
-```json
-{
-  "active": "default",
-  "default": {
-    "ask":  { "model": "anthropic/claude-opus-4-5", "effort": "high" },
-    "plan": { "model": "anthropic/claude-opus-4-5", "effort": "xhigh" },
-    "auto": { "model": "anthropic/claude-haiku-4-5", "effort": "low" },
-    "bypass": { "model": "anthropic/claude-haiku-4-5", "effort": "medium" }
-  },
-  "fast": {
-    "ask":  "anthropic/claude-haiku-4-5:low",
-    "plan": "anthropic/claude-haiku-4-5:low",
-    "auto": "anthropic/claude-haiku-4-5:off"
-  }
-}
-```
-
-- **Model ID**: `"provider/model"`, or `"provider/model:effort"` (the `:effort` suffix sets thinking after the switch).
-- **`ModeConfig.effort`**: explicit field (`off` | `minimal` | `low` | `medium` | `high` | `xhigh`). Wins over a `:suffix` on the same entry. If neither is set, defaults to **`medium`**.
-- When the mode changes, the extension calls `pi.setModel()` then `pi.setThinkingLevel()`. Unknown levels are skipped with a notify warning.
-- The footer shows `profile:<name> · model/thinking` when a profile is active.
-
-If the file doesn't exist on first install, the extension creates it for you (pre-filled with the user's default model from `~/.pi/agent/settings.json` when available).
-
-**Why a separate `model-profiles.json` and not pi's built-in `models.json`?** Pi uses `~/.pi/agent/models.json` for custom provider definitions; using a different filename avoids format conflict.
+**Switching permission modes never touches the model or the thinking level** — use pi's built-in `/model` and the `alt+t` shortcut instead. The model-profile system (`~/.pi/agent/model-profiles.json`, `/model-profile`, `Alt+I`, `--model-profile`) was removed in v3.0.0: it duplicated pi's native model switching and silently changed the model/effort on mode switches.
 
 ## Commands, shortcut, flag
 
@@ -117,34 +91,29 @@ If the file doesn't exist on first install, the extension creates it for you (pr
 | Command | `/ask`, `/plan`, `/auto` | switch to that mode (`/default` also works as alias) |
 | Command | `/mode [name]` | set the given mode, or pick from a list |
 | Command | `/auto-depth <n>` | cap auto-mode follow-ups (`0` = unlimited; default 20) |
-| Command | `/model-profile` | show selector of available profiles |
-| Command | `/model-profile <name>` | activate the named profile (also `/model-profile list` to print them) |
 | Shortcut | `Shift+Tab` | cycle modes (default — configurable, see below) |
 | Shortcut | `Alt+T` | cycle thinking level (off → minimal → low → medium → high → xhigh) |
-| Shortcut | `Alt+I` | cycle model profile (next profile from `~/.pi/agent/model-profiles.json`; re-applies the model for the current mode) |
 | Command | `/permissions` | list merged allow/deny/ask rules |
 | Command | `/outside-writes` | list tracked outside-cwd writes (read-only) |
 | Command | `/undo-outside-writes` | restore outside-cwd writes (selector, `all`, or `--list`) |
 | Flag | `--permission-mode <name>` | start in a mode (accepts `ask`, `plan`, `auto`, or `default` as alias; default `ask`) |
-| Flag | `--model-profile <name>` | start with a named profile activated |
 
 > The start-mode flag is `--permission-mode` (not `--mode`) because pi already has a built-in `--mode` for output format (text/json/rpc).
 
 ### Custom shortcuts
 
-All three shortcuts are configurable via the `shortcuts` block in `~/.pi/agent/permission-modes.json`:
+Both shortcuts are configurable via the `shortcuts` block in `~/.pi/agent/permission-modes.json`:
 
 ```json
 {
   "shortcuts": {
     "cycleMode": "ctrl+shift+m",
-    "cycleThinking": "alt+t",
-    "cycleProfile": "alt+i"
+    "cycleThinking": "alt+t"
   }
 }
 ```
 
-- **Defaults** (when the block or a key is omitted): `cycleMode: "shift+tab"`, `cycleThinking: "alt+t"`, `cycleProfile: "alt+i"` — behavior is unchanged from previous versions.
+- **Defaults** (when the block or a key is omitted): `cycleMode: "shift+tab"`, `cycleThinking: "alt+t"` — behavior is unchanged from previous versions.
 - Keys are normalized to lowercase before registering; set a key to `null` to disable that shortcut entirely.
 - **Unsafe keys are refused** (not registered) with a warning on stderr and at session start: terminal control-char aliases `ctrl+m` (= Enter/CR), `ctrl+i` (= Tab), `ctrl+j`, `ctrl+h` (= Backspace), `ctrl+[` (= Escape), the bare editor keys `tab` / `backspace` / `space`, and bare or `shift+`-prefixed single printable characters (they would shadow typing). Use a safe combo such as `ctrl+shift+m` or `alt+m` instead.
 - The footer hint follows the registered `cycleMode` key (omitted when disabled or refused).
@@ -163,31 +132,6 @@ In **auto mode**, `edit` and `write` calls to paths outside the working director
 
 Snapshots capture the file's pre-write content (or `null` if the file didn't exist). They persist across sessions until you undo them. The snapshot cap is 100 entries (oldest are evicted; you get a notification).
 
-### Per-mode skill filtering (v1.1.4, fixed in v1.1.5)
-
-When you're in **plan mode**, skills like `systematic-debugging` and `executing-plans` are irrelevant noise. Skill filtering lets you configure which skills get injected into the system prompt per mode — saving tokens and keeping the agent focused.
-
-```json
-{
-  "active": "default",
-  "default": {
-    "ask": "anthropic/claude-sonnet-4-5",
-    "plan": {
-      "model": "anthropic/claude-sonnet-4-5",
-      "skills": ["brainstorming", "writing-plans"]
-    },
-    "auto": "openai/gpt-4o"
-  }
-}
-```
-
-- `"skills": ["brainstorming", "writing-plans"]` — only these two skills appear in the system prompt when in plan mode.
-- `"skills": ["*"]` or omitting `skills` entirely — allow all skills (default, no filtering).
-- String shorthand (`"anthropic/claude-sonnet-4-5"`) still works — backward compatible.
-- Skills can still be invoked manually via `/skill:name` if needed — filtering only controls which skills are pre-loaded into the agent's context.
-
-**Resolution order:** Active profile → default profile → hardcoded defaults (`["*"]`). The `read` tool is always mandatory in tool filters (full tool filtering is planned for a future release).
-
 ### Plan mode flow
 
 In plan mode the agent explores read-only and emits a numbered list under a `Plan:` header. On completion you choose:
@@ -198,12 +142,12 @@ In plan mode the agent explores read-only and emits a numbered list under a `Pla
 
 ## UI
 
-- A custom **adaptive footer** (v1.1.6): wide terminals show **cwd [git-branch] · context usage · profile/model** on line 1 and **mode** on line 2; narrow terminals reflow to two compact lines with truncation.
+- A custom **adaptive footer** (v1.1.6): wide terminals show **cwd [git-branch] · context usage · model** on line 1 and **mode** on line 2; narrow terminals reflow to two compact lines with truncation.
 - **Context usage** in the footer shows `tokens/contextWindow percent` (e.g. `42k/200k 21.0%`; large counts use `M`).
 - While the agent is streaming, the working indicator shows live **token / tok-s / cost / % context** stats; it reverts to the default loader when idle.
 - Mode colors: ask = muted, plan = accent, auto = warning. The colored status pill was removed in v1.1.6 — mode is shown in the footer only.
 
-Current mode, the auto-follow-up depth, and the active profile name **persist** across `/reload` and session resume.
+Current mode and the auto-follow-up depth **persist** across `/reload` and session resume.
 
 ## Install / run
 
@@ -212,19 +156,31 @@ Current mode, the auto-follow-up depth, and the active profile name **persist** 
 pi install npm:@georgedong32/permission-modes
 pi list                                            # verify it loaded
 
-# Or run it directly for a quick try (no install)
-pi -e ./extensions/permission-modes/index.ts
+# Or run it directly for a quick try (no install; loads the built bundle)
+pi -e ./extensions/permission-modes/dist/index.js
 
 # During development, hot-reload after edits
 /reload
 ```
 
-Auto-discovery also works: drop this folder at `~/.pi/agent/extensions/permission-modes/` (global) or `.pi/extensions/permission-modes/` (project) and pi loads `index.ts` automatically.
+Auto-discovery also works: drop this folder at `~/.pi/agent/extensions/permission-modes/` (global) or `.pi/extensions/permission-modes/` (project) — pi reads `pi.extensions` from `package.json` and loads `dist/index.js`.
+
+## Build
+
+pi loads the prebuilt single-file bundle `dist/index.js` (zero runtime dependencies — every third-party import would be either inlined and registered, or rejected by the build gates). Source lives in the repo's TypeScript modules; rebuild after editing them and commit the result:
+
+```bash
+npm run build                # bundle + gates: import whitelist, inlined inventory, size budget
+npm run build -- --no-minify # readable build for debugging (do not commit)
+npm run build -- --report    # print the module inventory (what got bundled, sizes)
+```
+
+`dist.test.ts` fails when the committed bundle is stale, imports a non-host package, or exceeds the size budget.
 
 ## Testing
 
 ```bash
-npm test                # run all 189 tests (vitest)
+npm test                # run all tests (vitest), including the dist artifact guards
 npm run test:watch      # watch mode for development
 ```
 
@@ -236,17 +192,18 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
 ```
 permission-modes/             # @georgedong32/permission-modes
-├── package.json              # pi manifest + npm package metadata
-├── index.ts                  # main extension (default-exported factory)
-├── profiles.ts               # NEW in v1.1.1: model-profile config helpers
-├── profiles.test.ts          # NEW in v1.1.1: unit tests for profiles
+├── package.json              # pi manifest (pi.extensions → dist/index.js) + npm metadata
+├── package-lock.json         # dev dependency tree, committed (exact versions + integrity)
+├── index.ts                  # main extension source (default-exported factory)
 ├── utils.ts                  # bash allowlist + Plan: + [DONE:n] helpers
-├── index.test.ts             # integration tests (vitest)
-├── utils.test.ts             # unit tests (vitest)
+├── scripts/build.js          # esbuild bundler + build gates (single-file dist)
+├── dist/index.js             # COMMITTED build artifact — what pi actually loads
+├── types/raw.d.ts            # editor types for `*.txt?raw` imports
+├── *.test.ts                 # tests (vitest), incl. dist.test.ts artifact guards
 ├── vitest.config.ts          # vitest config
 ├── CHANGELOG.md              # release history
 ├── LICENSE                   # MIT
-├── .gitignore                # excludes node_modules, lockfile, .pi/
+├── .gitignore                # excludes node_modules, .pi/ artifacts (lock is committed)
 └── docs/
     ├── PRD.md                # product requirements
     └── prompts/              # mode-specific prompt context
@@ -255,4 +212,4 @@ permission-modes/             # @georgedong32/permission-modes
         └── auto-mode-prompts.md
 ```
 
-Third-party deps: none. Peer dependencies (bundled by pi): `@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, `@earendil-works/pi-tui`, `typebox`. The model is switched **only when the user opts in via `~/.pi/agent/model-profiles.json`** — without a profile config file, the model never changes and the extension behaves exactly as in v1.1.0.
+Runtime third-party deps: **none** — the shipped `dist/index.js` is a single self-contained file (83 kB / 29 kB gzip) that only imports `node:*` builtins and the pi host packages, which pi provides as virtual modules (peer dependencies: `@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, `@earendil-works/pi-tui`, `typebox`). Build tooling (esbuild, vitest) is dev-only and pinned by the committed lockfile. **Switching permission modes never calls `setModel` / `setThinkingLevel`** — the extension only gates tool-call approvals.
