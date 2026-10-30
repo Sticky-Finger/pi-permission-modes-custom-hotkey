@@ -59,6 +59,13 @@ import {
   warnIfLocalPermissionsNotGitignored,
 } from "./permissions-loader.ts";
 import {
+  buildFeedbackDenialReason,
+  buildFeedbackOptionLabel,
+  buildFeedbackPromptTitle,
+  FEEDBACK_OPTION_LABEL,
+  sanitizeFeedback,
+} from "./permission-feedback.ts";
+import {
   evaluateToolPermission,
   formatMergedRulesForDisplay,
   suggestAllowRuleForToolCall,
@@ -103,6 +110,7 @@ import {
 import {
   createForwardingPoller,
   defaultAgentDir,
+  deriveRequesterAgentName,
   isSubagentChildProcess,
   pollForwardedResponse,
   resolveParentSessionId,
@@ -212,6 +220,29 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
     });
   }
 
+  /**
+   * Ask the user what the agent should do differently.
+   * Uses pi's native inline editor (same widget family as the selector),
+   * so the prompt appears at the end of the conversation flow.
+   * Returns undefined when the user cancels or submits empty text.
+   */
+  async function promptPermissionFeedback(
+    ctx: ExtensionContext,
+    tool: string,
+    target?: string,
+  ): Promise<string | undefined> {
+    try {
+      const title = buildFeedbackPromptTitle(tool, target);
+      const raw = await ctx.ui.editor(title, "");
+      const feedback = sanitizeFeedback(raw);
+      return feedback.length > 0 ? feedback : undefined;
+    } catch {
+      // Editor failed (e.g. aborted) — treat as "no feedback" so the call
+      // still fails closed as an ordinary denial.
+      return undefined;
+    }
+  }
+
   async function promptWithPermissionOptions(
     ctx: ExtensionContext,
     tool: string,
@@ -239,10 +270,14 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
       const requesterSessionId =
         (ctx.sessionManager as { getSessionId?: () => string })?.getSessionId?.() ??
         "";
+      const requesterAgentName = deriveRequesterAgentName(
+        (ctx.sessionManager as { getSessionName?: () => string })?.getSessionName?.(),
+      );
       const { id, challenge } = await writeForwardedRequest({
         agentDir,
         targetSessionId: parent,
         requesterSessionId,
+        ...(requesterAgentName ? { requesterAgentName } : {}),
         tool,
         label,
         category,
@@ -278,6 +313,7 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
       "Allow always (this project)",
       "Allow always (global)",
       "Block",
+      FEEDBACK_OPTION_LABEL,
     ]);
     if (choice === "Allow always (this project)") {
       const rule = suggestAllowRuleForToolCall(tool, input, ctx.cwd);
@@ -317,6 +353,15 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
         trackOutsideWriteIfNeeded(ctx, tool, String(input.path ?? ""));
       }
       return undefined;
+    }
+    if (choice === FEEDBACK_OPTION_LABEL) {
+      pendingComplianceInject = true;
+      complianceCategory = category;
+      const feedback = await promptPermissionFeedback(ctx, tool);
+      return {
+        block: true,
+        reason: buildFeedbackDenialReason(`${tool} blocked by user`, feedback),
+      };
     }
     if (choice !== "Allow") {
       pendingComplianceInject = true;
@@ -1475,6 +1520,7 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
           "Allow always (global)",
           "Allow all (enable bypass)",
           "Block",
+          FEEDBACK_OPTION_LABEL,
         ]);
         if (choice === "Allow always (this project)") {
           const rule = suggestAllowRuleForToolCall(tool, input, ctx.cwd);
@@ -1501,6 +1547,16 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
         if (choice === "Allow all (enable bypass)") {
           await setMode("bypass", ctx);
           return undefined;
+        }
+        if (choice === FEEDBACK_OPTION_LABEL) {
+          const feedback = await promptPermissionFeedback(ctx, tool);
+          return {
+            block: true,
+            reason: buildFeedbackDenialReason(
+              `${tool} blocked by user on ${pathVal}`,
+              feedback,
+            ),
+          };
         }
         if (choice !== "Allow")
           return { block: true, reason: `${tool} blocked by user on ${pathVal}` };
@@ -1872,12 +1928,18 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
     let approved = false;
     let denialReason: string | undefined = `${request.tool} blocked by user`;
 
+    // Subagent asks are answered by the parent on its behalf, so the
+    // feedback option addresses the subagent by name when it is known.
+    const feedbackTarget = name || "the subagent";
+    const feedbackOption = buildFeedbackOptionLabel(feedbackTarget);
+
     try {
       const choice = await ctx.ui.select(title, [
         "Allow",
         "Allow always (this project)",
         "Allow always (global)",
         "Block",
+        feedbackOption,
       ]);
       if (choice === "Allow") {
         decision = "allow";
@@ -1926,6 +1988,18 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
           reloadMergedPermissionRules(ctx.cwd);
           ctx.ui.notify(`Added allow rule (global): ${rule}`);
         }
+      } else if (choice === feedbackOption) {
+        decision = "block";
+        approved = false;
+        const feedback = await promptPermissionFeedback(
+          ctx,
+          request.tool,
+          feedbackTarget,
+        );
+        denialReason = buildFeedbackDenialReason(
+          `${request.tool} blocked by user`,
+          feedback,
+        );
       }
     } catch {
       decision = "block";

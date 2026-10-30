@@ -9,7 +9,7 @@
 - [ ] [Feature] 所有权限门禁的选项列表末尾追加「No, and tell the agent what to do differently」（UI 沿用原有选择器，仅加选项）
   - 实现计划：[docs/plan/20261030-0401-permission-feedback-dialog.md](plan/20261030-0401-permission-feedback-dialog.md)
   - 分支：`feat/permission-feedback-dialog`（自 `feat/configurable-shortcuts` 切出）
-  - 状态：📋 计划待审阅（v3 最小改动版）；覆盖 3 处门禁（ask 通用审批 / ask edit-write / 子代理转发审批），反馈文字并入拒绝原因回传模型
+  - 状态：🚧 编码完成（新增 `permission-feedback.ts` + 单测 11 例；三处门禁集成测试 14 例；转发协议零改动；产物已重建 84,324 B / 29,352 B gzip，待实机验收与提交）
 
 ## 已完成
 

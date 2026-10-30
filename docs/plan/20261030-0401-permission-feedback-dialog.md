@@ -104,4 +104,35 @@
 
 ## 7. 实施结果
 
-（待编码完成后回填：测试数、包体大小、与计划的偏差说明。）
+**已完成（2026-10-30）。**
+
+### 实现
+
+| 变更 | 位置 |
+|---|---|
+| 新增纯函数模块 `permission-feedback.ts` | 选项文案 / 反馈提示标题 / 反馈清洗（合并空白 + 1000 字符上限）/ 拒绝原因拼接 |
+| 通用审批门禁（ask bash + cwd 外读取、auto tier-3） | `index.ts` → `promptWithPermissionOptions`：选项列表末尾追加反馈项 |
+| ask 模式 edit/write 门禁 | `index.ts` → tool_call gate：同样末尾追加（保留原有 bypass 选项位置） |
+| 子代理转发审批（父会话代答） | `index.ts` → `handleForwardedPermissionRequest`：反馈项文案带子代理名；反馈写入既有 `denialReason` 字段 |
+| 子代理名传递 | `permission-forwarding.ts` → `deriveRequesterAgentName()`（从子会话名取 agent 段）；子进程转发时填入既有可选字段 `requesterAgentName`（**协议字段未新增**） |
+| 反馈输入框 | 使用 pi 原生 `ctx.ui.editor()`（内联在对话流末尾，非自绘浮层） |
+
+### 与计划的偏差
+
+1. **子代理场景的反馈文案默认是「the subagent」而不是「the agent」**：计划 §2.1 举例为 `No, and tell scout what to do differently`，但当子代理名不可得时无法填入具体名字，故退化为 `No, and tell the subagent what to do differently`（子代理名可得时仍按计划显示名字）。
+2. **子代理名来源与一处附带影响**：计划未指定来源。实现采用子进程会话名的 agent 段（pi-subagents 的子会话名为 `<agent>: <任务摘要>`），取不到时不填 `requesterAgentName`。
+   - `requesterAgentName` 是**既有可选协议字段**（v2.6.3 起就在类型与父会话标题里），本次只是首次真正填值，**未新增任何协议字段**。
+   - 附带影响：父会话的转发审批标题由 `[Subagent] Allow bash? ...` 变为 `[Subagent scout] Allow bash? ...`（父会话标题本来就写好了带名字的分支，只是此前永远为空）。若需保持旧标题，去掉子进程侧填充即可（反馈文案随之退化为「the subagent」）。
+3. **反馈的提示标题**：`Tell the agent how to proceed with <tool>:`（计划示例与此一致）。
+
+### 验证数据
+
+- `npm test`：**334 个测试全部通过**（基线 307 + 新增 27）。
+  - 新增 `permission-feedback.test.ts`：11 例（文案 / 标题 / 清洗 / 拒绝原因拼接）。
+  - `index.test.ts` 新增：14 例（三处门禁的选项顺序、反馈入拒绝原因、空输入与取消退化为普通拒绝、其余选项行为不变、auto tier-3、子代理父会话侧反馈与子代理名、子进程转发把反馈带给子代理）。
+  - `permission-forwarding.test.ts` 新增：2 例（`deriveRequesterAgentName` 提取与拒绝）。
+- `npm run build`：产物 **84,324 B raw / 29,352 B gzip**（预算 92,160 B / 32,768 B），三道构建门禁全过；基线 83,197 B / 28,994 B，**增量 +1,127 B raw / +358 B gzip**（纯增量，远低于预算压力）。
+
+### 待办
+
+- 实机验收（bash / edit-write / 越界读取三种场景）后由用户确认是否提交（提交需用户本人明确同意）。

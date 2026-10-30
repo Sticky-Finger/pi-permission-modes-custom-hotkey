@@ -80,6 +80,25 @@ Example global config:
 
 When a tool call would prompt, you can choose **Allow always (this project)** or **Allow always (global)** to persist an allow rule. Use `/permissions` to list the merged rule set.
 
+### Telling the agent what to do differently
+
+Every permission prompt ends with one extra option:
+
+```
+No, and tell the agent what to do differently
+```
+
+Pick it and pi opens its native inline editor (`Tell the agent how to proceed with <tool>:`) — type what the agent should do instead and press <kbd>Enter</kbd>. The call is **blocked**, and your text rides along with the rejection reason, so the model sees both the denial and the correction:
+
+```
+bash blocked by user. User feedback: use the local VERSION file instead
+```
+
+- Works on the ask-mode approvals (bash / outside-cwd reads / edit-write), the auto-mode tier-3 prompt, and the subagent approval the parent session answers on a child's behalf.
+- For a subagent request the option names the subagent (`No, and tell scout what to do differently`).
+- Empty input, cancelling the editor, or cancelling the prompt = a plain block (nothing is ever let through).
+- The feedback is **not** sent as a separate user message — it only travels with the denial reason.
+
 ## Model & thinking
 
 **Switching permission modes never touches the model or the thinking level** — use pi's built-in `/model` and the `alt+t` shortcut instead. The model-profile system (`~/.pi/agent/model-profiles.json`, `/model-profile`, `Alt+I`, `--model-profile`) was removed in v3.0.0: it duplicated pi's native model switching and silently changed the model/effort on mode switches.

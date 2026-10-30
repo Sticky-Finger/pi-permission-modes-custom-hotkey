@@ -42,9 +42,34 @@ All prompts use `ctx.ui.select(title, options)` when `ctx.hasUI` is true.
 | Condition | Action |
 |---|---|
 | `!ctx.hasUI` and no `PI_SUBAGENT_PARENT_SESSION` | Block with `needs approval: no UI available` |
-| `!ctx.hasUI` and `PI_SUBAGENT_PARENT_SESSION` set | Forward ask to parent session UI via `permission-modes-forwarding` inbox; parent Allow / Allow always / Block; timeout or deny → block |
+| `!ctx.hasUI` and `PI_SUBAGENT_PARENT_SESSION` set | Forward ask to parent session UI via `permission-modes-forwarding` inbox; parent Allow / Allow always / Block / feedback; timeout or deny → block |
 
-Local ask-mode `edit`/`write` with UI still offers the five-option dialog (including bypass). Forwarded asks use the shared four-option set only (no bypass).
+Local ask-mode `edit`/`write` with UI still offers the six-option dialog (including bypass). Forwarded asks use the shared five-option set only (no bypass).
+
+### 3.0 Shared approval option set
+
+Every permission prompt ends with the same **last** option:
+
+```
+No, and tell the agent what to do differently
+```
+
+| Field | Value |
+|---|---|
+| **Label** | `No, and tell the agent what to do differently` (subagent prompts substitute the subagent name: `No, and tell scout what to do differently`) |
+| **Position** | Always the **last** entry of the option list |
+| **Follow-up prompt** | pi's native inline editor, titled `Tell the agent how to proceed with <tool>:` |
+| **Effect** | The call is **blocked**; the block reason carries the typed text (see below) |
+
+**Denial reason format:**
+
+```
+<tool> blocked by user[ on <path>]. User feedback: <sanitized text>
+```
+
+- The feedback text is whitespace-collapsed, trimmed, and capped at 1000 characters.
+- Empty input, a cancelled editor, or a cancelled selector → **ordinary denial** (no `User feedback:` suffix, nothing is allowed through).
+- The reason is what the model sees as the tool error, so the model receives both the rejection *and* the requested change.
 
 ### 3a. edit/write approval
 
@@ -53,7 +78,7 @@ Local ask-mode `edit`/`write` with UI still offers the five-option dialog (inclu
 | **Trigger** | `tool === "edit"` **or** `tool === "write"` |
 | **Path check** | Any path (no outside-cwd distinction for writes — always prompt) |
 | **Title** | `` `Allow ${tool} on ${path}?` `` |
-| **Options** | `["Allow", "Allow all (enable auto)", "Block"]` |
+| **Options** | `["Allow", "Allow always (this project)", "Allow always (global)", "Allow all (enable bypass)", "Block", <feedback option>]` |
 | **Default** | (none — user must pick) |
 
 **Behavior per option:**
@@ -61,18 +86,21 @@ Local ask-mode `edit`/`write` with UI still offers the five-option dialog (inclu
 | Choice | Action |
 |---|---|
 | `"Allow"` | Return `undefined` (allow the tool call) |
-| `"Allow all (enable auto)"` | Call `setMode("auto", ctx)` + return `undefined` |
+| `"Allow always (this project)"` | Persist a project-local allow rule + return `undefined` |
+| `"Allow always (global)"` | Persist a global allow rule + return `undefined` |
+| `"Allow all (enable bypass)"` | Call `setMode("bypass", ctx)` + return `undefined` |
 | `"Block"` | Return `{ block: true, reason: \`${tool} blocked by user on ${path}\` }` |
+| feedback option | Return `{ block: true, reason: \`${tool} blocked by user on ${path}. User feedback: <text>\` }` |
 
-**No-UI fallback:** without parent session → `{ block: true, reason: \`${tool} blocked: no UI available to confirm.\` }` (via `promptApproval` / forwarding path: `needs approval: no UI available` or parent timeout/deny). With `PI_SUBAGENT_PARENT_SESSION`, forward to parent (four options; no bypass).
+**No-UI fallback:** without parent session → `{ block: true, reason: \`${tool} blocked: no UI available to confirm.\` }` (via `promptApproval` / forwarding path: `needs approval: no UI available` or parent timeout/deny). With `PI_SUBAGENT_PARENT_SESSION`, forward to parent (five options; no bypass).
 
 ### 3b. read-outside-cwd approval (NEW in v1.1.0)
 
 | Field | Value |
 |---|---|
 | **Trigger** | `tool === "read"` **AND** `isOutsideCwd(path, ctx.cwd) === true` |
-| **Title** | `` `Allow read outside cwd: ${path}?` `` |
-| **Options** | `["Allow", "Block"]` |
+| **Title** | `` `Allow ${tool}? outside cwd on "${path}"` `` |
+| **Options** | `["Allow", "Allow always (this project)", "Allow always (global)", "Block", <feedback option>]` |
 
 **Behavior:**
 
@@ -80,24 +108,26 @@ Local ask-mode `edit`/`write` with UI still offers the five-option dialog (inclu
 |---|---|
 | Inside cwd (`isOutsideCwd === false`) | Auto-approve (return `undefined`) |
 | Outside cwd, user picks `"Allow"` | Return `undefined` |
-| Outside cwd, user picks `"Block"` | Return `{ block: true, reason: \`read blocked by user on ${path} (outside cwd)\` }` |
-| No UI | `{ block: true, reason: \`read blocked: no UI available to confirm.\` }` |
+| Outside cwd, user picks `"Block"` | Return `{ block: true, reason: \`${tool} blocked by user\` }` |
+| Outside cwd, user picks the feedback option | Return `{ block: true, reason: \`${tool} blocked by user. User feedback: <text>\` }` |
+| No UI | `{ block: true, reason: \`${tool} blocked: no UI available to confirm.\` }` |
 
 ### 3c. destructive bash approval
 
-Same as v1.0.0 — carried forward unchanged.
+Same as v1.0.0 — carried forward unchanged, plus the shared feedback option.
 
 | Field | Value |
 |---|---|
 | **Trigger** | `tool === "bash"` **AND** `isSafeCommand(cmd) === false` |
-| **Title** | `` `Allow "${cmd}"?` `` |
-| **Options** | `["Allow", "Block"]` |
+| **Title** | `` `Allow bash? "${cmd}"` `` |
+| **Options** | `["Allow", "Allow always (this project)", "Allow always (global)", "Block", <feedback option>]` |
 
 | Condition | Action |
 |---|---|
 | Safe command | Auto-approve (return `undefined`) |
 | Unsafe, user picks `"Allow"` | Return `undefined` |
 | Unsafe, user picks `"Block"` | Return `{ block: true, reason: \`bash blocked by user\` }` |
+| Unsafe, user picks the feedback option | Return `{ block: true, reason: \`bash blocked by user. User feedback: <text>\` }` |
 | No UI | `{ block: true, reason: \`bash blocked: no UI available to confirm.\` }` |
 
 ---

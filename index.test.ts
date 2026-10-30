@@ -24,6 +24,7 @@ import {
 import { writePlanFile } from "./utils.ts"
 import {
 	listPendingRequests,
+	readForwardedResponse,
 	setAgentDirForTests,
 	writeForwardedRequest,
 	writeForwardedResponse,
@@ -59,6 +60,7 @@ interface FakePi {
 		cwd: string,
 		ui?: unknown,
 		registry?: { find: (provider: string, model: string) => unknown },
+		sessionId?: string,
 	) => Promise<void>
 	simulateToolCall: (
 		toolName: string,
@@ -81,6 +83,8 @@ interface FakeCtxOptions {
 	mode?: string
 	cwd: string
 	projectRoot?: string | null
+	sessionId?: string
+	sessionName?: string
 	ui?: {
 		select?: (label: string, options: string[]) => Promise<string>
 		custom?: <T>(factory: unknown, options?: unknown) => Promise<T>
@@ -182,12 +186,14 @@ function createFakePi(): FakePi {
 			cwd: string,
 			ui?: unknown,
 			registry?: { find: (provider: string, model: string) => unknown },
+			sessionId?: string,
 		) {
 			const list = handlers.get("session_start") ?? []
 			const fullCtx = makeCtx(pi, {
 				cwd,
 				ui: (ui ?? {}) as FakeCtxOptions["ui"],
 				modelRegistry: registry ?? pi.modelRegistry,
+				...(sessionId ? { sessionId } : {}),
 			})
 			for (const h of list) await h({}, fullCtx)
 		},
@@ -262,6 +268,8 @@ function makeCtx(
 			getBranch: () => [],
 			getGitBranch: () => "",
 			getEntries: () => [],
+			...(opts.sessionId ? { getSessionId: () => opts.sessionId } : {}),
+			...(opts.sessionName ? { getSessionName: () => opts.sessionName } : {}),
 		},
 		model: undefined,
 	}
@@ -743,6 +751,157 @@ describe("permission-modes extension: tool_call gate", () => {
 	})
 })
 
+describe("permission-modes extension: permission feedback option", () => {
+	let pi: FakePi
+	let realProjectRoot: string
+	let configTmp: string
+
+	const FEEDBACK_LABEL = "No, and tell the agent what to do differently"
+
+	beforeEach(async () => {
+		pi = createFakePi()
+		configTmp = mkdtempSync(join(tmpdir(), "pm-fb-cfg-"))
+		setConfigPath(join(configTmp, "permission-modes.json"))
+		writeFileSync(
+			join(configTmp, "permission-modes.json"),
+			JSON.stringify({ classifier: { enabled: false } }),
+		)
+		realProjectRoot = process.cwd()
+		permissionModesExtension(makeFakePiForExtension(pi))
+		await pi.simulateSessionStart(realProjectRoot)
+	})
+
+	afterEach(() => {
+		rmSync(configTmp, { recursive: true, force: true })
+	})
+
+	async function callToolCall(
+		toolName: string,
+		input: Record<string, unknown>,
+		ui: FakeCtxOptions["ui"],
+	) {
+		const ctx = makeCtx(pi, { cwd: realProjectRoot, ui })
+		return pi.simulateToolCall(toolName, input, ctx)
+	}
+
+	it("offers the feedback option as the last entry of the ask-mode selector", async () => {
+		let seenOptions: string[] = []
+		await callToolCall("bash", { command: "rm -rf /" }, {
+			select: async (_label, options) => {
+				seenOptions = options
+				return "Block"
+			},
+		})
+		expect(seenOptions).toEqual([
+			"Allow",
+			"Allow always (this project)",
+			"Allow always (global)",
+			"Block",
+			FEEDBACK_LABEL,
+		])
+	})
+
+	it("blocks with the feedback text so the model sees it", async () => {
+		const result = await callToolCall("bash", { command: "rm -rf /" }, {
+			select: async () => FEEDBACK_LABEL,
+			editor: async () => "don't delete system files",
+		})
+		expect(result).toMatchObject({
+			block: true,
+			reason: expect.stringContaining("User feedback: don't delete system files"),
+		})
+	})
+
+	it("passes the tool name to the feedback prompt", async () => {
+		let title = ""
+		await callToolCall("bash", { command: "rm -rf /" }, {
+			select: async () => FEEDBACK_LABEL,
+			editor: async (t) => {
+				title = t
+				return "use the local cache"
+			},
+		})
+		expect(title).toBe("Tell the agent how to proceed with bash:")
+	})
+
+	it("treats empty feedback as a plain block (no feedback in the reason)", async () => {
+		const result = await callToolCall("bash", { command: "rm -rf /" }, {
+			select: async () => FEEDBACK_LABEL,
+			editor: async () => "   ",
+		})
+		expect(result).toMatchObject({ block: true, reason: "bash blocked by user" })
+	})
+
+	it("treats a cancelled feedback prompt as a plain block", async () => {
+		const result = await callToolCall("bash", { command: "rm -rf /" }, {
+			select: async () => FEEDBACK_LABEL,
+			editor: async () => undefined,
+		})
+		expect(result).toMatchObject({ block: true, reason: "bash blocked by user" })
+	})
+
+	it("keeps every other option behaviour unchanged", async () => {
+		const allowed = await callToolCall("bash", { command: "rm -rf /" }, {
+			select: async () => "Allow",
+		})
+		expect(allowed).toBeUndefined()
+
+		const blocked = await callToolCall("bash", { command: "rm -rf /" }, {
+			select: async () => "Block",
+		})
+		expect(blocked).toMatchObject({ block: true, reason: "bash blocked by user" })
+	})
+
+	it("works on the ask-mode edit/write gate and keeps the path in the reason", async () => {
+		let seenOptions: string[] = []
+		const result = await callToolCall("edit", { path: "src/foo.ts" }, {
+			select: async (_label, options) => {
+				seenOptions = options
+				return FEEDBACK_LABEL
+			},
+			editor: async () => "edit the file under src/ instead",
+		})
+		expect(seenOptions).toEqual([
+			"Allow",
+			"Allow always (this project)",
+			"Allow always (global)",
+			"Allow all (enable bypass)",
+			"Block",
+			FEEDBACK_LABEL,
+		])
+		expect(result).toMatchObject({
+			block: true,
+			reason: expect.stringContaining(
+				"User feedback: edit the file under src/ instead",
+			),
+		})
+	})
+
+	it("works on the outside-cwd read gate", async () => {
+		const result = await callToolCall("read", { path: "/etc/passwd" }, {
+			select: async () => FEEDBACK_LABEL,
+			editor: async () => "read the local config instead",
+		})
+		expect(result).toMatchObject({
+			block: true,
+			reason: expect.stringContaining("User feedback: read the local config instead"),
+		})
+	})
+
+	it("works on the auto-mode tier-3 prompt", async () => {
+		pi.flags["permission-mode"] = "auto"
+		await pi.simulateSessionStart(realProjectRoot)
+		const result = await callToolCall("read", { path: ".git/config" }, {
+			select: async () => FEEDBACK_LABEL,
+			editor: async () => "read the tracked file instead",
+		})
+		expect(result).toMatchObject({
+			block: true,
+			reason: expect.stringContaining("User feedback: read the tracked file instead"),
+		})
+	})
+})
+
 describe("permission-modes extension: no auto follow-up (v2.0.0)", () => {
 	let pi: FakePi
 
@@ -1160,6 +1319,85 @@ describe("permission-modes: subagent ask forwarding", () => {
 		})
 	})
 
+	it("passes the parent's feedback text to the child as the block reason", async () => {
+		process.env.PI_SUBAGENT_CHILD = "1"
+		process.env.PI_SUBAGENT_PARENT_SESSION = "parent-fwd-fb"
+		await pi.simulateSessionStart(process.cwd())
+
+		const ctx = makeCtx(pi, { cwd: process.cwd() })
+		const toolPromise = pi.simulateToolCall(
+			"bash",
+			{ command: "curl http://evil" },
+			ctx,
+		)
+
+		await vi.waitFor(
+			async () => {
+				const pending = await listPendingRequests(agentDir, "parent-fwd-fb")
+				expect(pending.length).toBeGreaterThan(0)
+			},
+			{ timeout: 2000, interval: 20 },
+		)
+
+		const pending = await listPendingRequests(agentDir, "parent-fwd-fb")
+		await writeForwardedResponse(agentDir, "parent-fwd-fb", {
+			id: pending[0].id,
+			challenge: pending[0].challenge,
+			approved: false,
+			decision: "block",
+			responderSessionId: "parent-fwd-fb",
+			respondedAt: new Date().toISOString(),
+			denialReason:
+				"bash blocked by user. User feedback: use the local fixture instead",
+		})
+
+		const result = await toolPromise
+		expect(result).toMatchObject({
+			block: true,
+			reason: expect.stringContaining(
+				"User feedback: use the local fixture instead",
+			),
+		})
+	})
+
+	it("sends the child agent name to the parent", async () => {
+		process.env.PI_SUBAGENT_CHILD = "1"
+		process.env.PI_SUBAGENT_PARENT_SESSION = "parent-fwd-name"
+		await pi.simulateSessionStart(process.cwd())
+
+		const ctx = makeCtx(pi, {
+			cwd: process.cwd(),
+			sessionName: "scout: review the diff",
+		})
+		const toolPromise = pi.simulateToolCall(
+			"bash",
+			{ command: "gh pr view 1" },
+			ctx,
+		)
+
+		await vi.waitFor(
+			async () => {
+				const pending = await listPendingRequests(agentDir, "parent-fwd-name")
+				expect(pending.length).toBeGreaterThan(0)
+			},
+			{ timeout: 2000, interval: 20 },
+		)
+
+		const pending = await listPendingRequests(agentDir, "parent-fwd-name")
+		expect(pending[0].requesterAgentName).toBe("scout")
+
+		await writeForwardedResponse(agentDir, "parent-fwd-name", {
+			id: pending[0].id,
+			challenge: pending[0].challenge,
+			approved: false,
+			decision: "block",
+			responderSessionId: "parent-fwd-name",
+			respondedAt: new Date().toISOString(),
+			denialReason: "bash blocked by user",
+		})
+		await toolPromise
+	})
+
 	it("parent poller does not start under PI_SUBAGENT_CHILD=1", async () => {
 		process.env.PI_SUBAGENT_CHILD = "1"
 		process.env.PI_SUBAGENT_PARENT_SESSION = "ignored"
@@ -1183,6 +1421,130 @@ describe("permission-modes: subagent ask forwarding", () => {
 		// Main assert: child process must not call select for inbox.
 		await new Promise((r) => setTimeout(r, 400))
 		expect(selectCalls).toBe(0)
+	})
+})
+
+describe("permission-modes: subagent feedback option (parent answers)", () => {
+	let pi: ReturnType<typeof createFakePi>
+	let configTmp: string
+	let agentDir: string
+	const prevParent = process.env.PI_SUBAGENT_PARENT_SESSION
+	const prevChild = process.env.PI_SUBAGENT_CHILD
+
+	beforeEach(() => {
+		pi = createFakePi()
+		configTmp = mkdtempSync(join(tmpdir(), "pm-fbfb-cfg-"))
+		agentDir = mkdtempSync(join(tmpdir(), "pm-fbfb-agent-"))
+		setConfigPath(join(configTmp, "permission-modes.json"))
+		writeFileSync(
+			join(configTmp, "permission-modes.json"),
+			JSON.stringify({ classifier: { enabled: false } }),
+		)
+		setAgentDirForTests(agentDir)
+		delete process.env.PI_SUBAGENT_PARENT_SESSION
+		delete process.env.PI_SUBAGENT_CHILD
+		permissionModesExtension(makeFakePiForExtension(pi))
+	})
+
+	afterEach(() => {
+		setAgentDirForTests(undefined)
+		rmSync(configTmp, { recursive: true, force: true })
+		rmSync(agentDir, { recursive: true, force: true })
+		if (prevParent === undefined) delete process.env.PI_SUBAGENT_PARENT_SESSION
+		else process.env.PI_SUBAGENT_PARENT_SESSION = prevParent
+		if (prevChild === undefined) delete process.env.PI_SUBAGENT_CHILD
+		else process.env.PI_SUBAGENT_CHILD = prevChild
+		const shutdown = pi.handlers.get("session_shutdown") ?? []
+		for (const h of shutdown) void h({}, {})
+	})
+
+	/** Drive the parent-side handler through a real forwarded request. */
+	async function answerForwardedRequest(opts: {
+		select: (label: string, options: string[]) => Promise<string>
+		editor?: (label: string, val: string) => Promise<string | undefined>
+		requesterAgentName?: string
+	}) {
+		const parentSessionId = "parent-fb-1"
+		await pi.simulateSessionStart(
+			process.cwd(),
+			{ select: opts.select, editor: opts.editor },
+			undefined,
+			parentSessionId,
+		)
+		const { id, challenge } = await writeForwardedRequest({
+			agentDir,
+			targetSessionId: parentSessionId,
+			tool: "bash",
+			label: '"rm -rf /"',
+			category: "user-prompt",
+			cwd: process.cwd(),
+			input: {},
+			...(opts.requesterAgentName
+				? { requesterAgentName: opts.requesterAgentName }
+				: {}),
+		})
+		const response = await vi.waitFor(
+			async () => {
+				const pending = await listPendingRequests(agentDir, parentSessionId)
+				expect(pending.length).toBe(0)
+				const resp = await readForwardedResponse(agentDir, parentSessionId, id)
+				expect(resp).toBeTruthy()
+				return resp!
+			},
+			{ timeout: 3000, interval: 30 },
+		)
+		return { challenge, response }
+	}
+
+	it("offers the feedback option to the parent and forwards the text back", async () => {
+		let seenOptions: string[] = []
+		const { response } = await answerForwardedRequest({
+			select: async (_label, options) => {
+				seenOptions = options
+				return "No, and tell the subagent what to do differently"
+			},
+			editor: async () => "use the local test fixture instead",
+		})
+		expect(seenOptions).toEqual([
+			"Allow",
+			"Allow always (this project)",
+			"Allow always (global)",
+			"Block",
+			"No, and tell the subagent what to do differently",
+		])
+		expect(response.approved).toBe(false)
+		expect(response.decision).toBe("block")
+		expect(response.denialReason).toContain(
+			"User feedback: use the local test fixture instead",
+		)
+	})
+
+	it("addresses the subagent by name when the request carries one", async () => {
+		let seenOptions: string[] = []
+		let title = ""
+		const { response } = await answerForwardedRequest({
+			select: async (_label, options) => {
+				seenOptions = options
+				return "No, and tell scout what to do differently"
+			},
+			editor: async (t) => {
+				title = t
+				return "read the fixture"
+			},
+			requesterAgentName: "scout",
+		})
+		expect(seenOptions).toContain("No, and tell scout what to do differently")
+		expect(title).toBe("Tell scout how to proceed with bash:")
+		expect(response.denialReason).toContain("User feedback: read the fixture")
+	})
+
+	it("treats empty feedback as a plain block", async () => {
+		const { response } = await answerForwardedRequest({
+			select: async () => "No, and tell the subagent what to do differently",
+			editor: async () => "  ",
+		})
+		expect(response.approved).toBe(false)
+		expect(response.denialReason).toBe("bash blocked by user")
 	})
 })
 

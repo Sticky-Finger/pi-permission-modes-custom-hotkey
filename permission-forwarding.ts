@@ -76,6 +76,27 @@ export function resolveParentSessionId(): string | undefined {
 	return raw || undefined;
 }
 
+/**
+ * Best-effort agent name for a forwarded request.
+ *
+ * Subagent runtimes name the child session "<agent>: <task excerpt>"; the
+ * agent name is the part before the colon. A bare short name ("scout") is
+ * used as-is. Anything else (e.g. a long task title) is rejected so the
+ * parent never addresses a subagent by an awkward excerpt.
+ */
+export function deriveRequesterAgentName(
+	sessionName: string | undefined | null,
+): string | undefined {
+	const raw = sessionName?.trim();
+	if (!raw) return undefined;
+	const colon = raw.indexOf(":");
+	if (colon >= 0) {
+		const head = raw.slice(0, colon).trim();
+		return head.length > 0 && head.length <= 40 ? head : undefined;
+	}
+	return raw.length <= 40 && !/\s/.test(raw) ? raw : undefined;
+}
+
 export function isSubagentChildProcess(): boolean {
 	return process.env[SUBAGENT_CHILD_ENV] === "1";
 }
@@ -272,6 +293,17 @@ export async function listPendingRequests(
 	}
 	out.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 	return out;
+}
+
+/** Read a forwarded response by id (does not consume it). */
+export function readForwardedResponse(
+	agentDir: string,
+	sessionId: string,
+	id: string,
+): ForwardedPermissionResponse | null {
+	const path = join(responsesDir(agentDir, sessionId), `${id}.json`);
+	if (!existsSync(path)) return null;
+	return readJsonFile<ForwardedPermissionResponse>(path);
 }
 
 export async function writeForwardedResponse(

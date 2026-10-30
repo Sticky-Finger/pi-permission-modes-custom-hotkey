@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	createForwardingPoller,
+	deriveRequesterAgentName,
 	isValidForwardedResponse,
 	listPendingRequests,
 	pollForwardedResponse,
@@ -38,6 +39,23 @@ describe("permission-forwarding", () => {
 
 	it("resolveParentSessionId is undefined without env", () => {
 		expect(resolveParentSessionId()).toBeUndefined();
+	});
+
+	it("deriveRequesterAgentName extracts the agent part of a session name", () => {
+		expect(deriveRequesterAgentName("scout: review the diff")).toBe("scout");
+		expect(deriveRequesterAgentName("  scout : review the diff  ")).toBe("scout");
+		expect(deriveRequesterAgentName("scout")).toBe("scout");
+		expect(deriveRequesterAgentName("code-reviewer")).toBe("code-reviewer");
+	});
+
+	it("deriveRequesterAgentName rejects unusable names", () => {
+		expect(deriveRequesterAgentName(undefined)).toBeUndefined();
+		expect(deriveRequesterAgentName(null)).toBeUndefined();
+		expect(deriveRequesterAgentName("")).toBeUndefined();
+		expect(deriveRequesterAgentName("   ")).toBeUndefined();
+		expect(deriveRequesterAgentName(": only excerpt")).toBeUndefined();
+		expect(deriveRequesterAgentName("a long task title without an agent")).toBeUndefined();
+		expect(deriveRequesterAgentName("x".repeat(41))).toBeUndefined();
 	});
 
 	it("resolveParentSessionId trims and ignores empty", () => {

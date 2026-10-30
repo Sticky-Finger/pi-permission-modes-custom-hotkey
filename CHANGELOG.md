@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+### Added
+- **Permission feedback option** — every permission approval prompt now ends with `No, and tell the agent what to do differently`. Picking it opens pi's native inline editor (`Tell the agent how to proceed with <tool>:`); the call is blocked and the typed text rides along with the denial reason (`bash blocked by user. User feedback: ...`), so the model sees both the rejection and the requested change.
+  - Covers the ask-mode approvals (bash / outside-cwd reads / edit-write), the auto-mode tier-3 prompt, and the subagent approval the parent session answers on a child's behalf (the option names the subagent: `No, and tell scout what to do differently`).
+  - Empty input, a cancelled editor, or a cancelled prompt fall back to a plain block — the feedback path never lets a call through.
+  - The approval UI itself is unchanged: same title, same option order, same rendering position, same full command display; only one option is appended.
+
 ### Changed
 - **Single-file bundled artifact (`dist/index.js`)** — pi now loads one prebuilt, minified 83 kB file (29 kB gzip) instead of transpiling 22 TypeScript modules (203 kB) on every session start. Plan: [docs/plan/20261007-2115-dist-bundle.md](docs/plan/20261007-2115-dist-bundle.md).
   - `pi.extensions` now points at `./dist/index.js`; the npm tarball ships only `dist/` + docs (no loose `.ts` files).
