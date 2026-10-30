@@ -6,10 +6,10 @@
 
 ## 进行中
 
-- [ ] [Feature] 所有权限门禁加入 CC 风格「No, and tell the agent what to do differently」内联输入选项（自定义对话框 + RPC 回退）
+- [ ] [Feature] 所有权限门禁的选项列表末尾追加「No, and tell the agent what to do differently」（UI 沿用原有选择器，仅加选项）
   - 实现计划：[docs/plan/20261030-0401-permission-feedback-dialog.md](plan/20261030-0401-permission-feedback-dialog.md)
   - 分支：`feat/permission-feedback-dialog`（自 `feat/configurable-shortcuts` 切出）
-  - 状态：📋 计划待审阅；覆盖 3 处门禁（ask 通用审批 / ask edit-write / 子代理转发审批），反馈文字并入 block reason 回传模型
+  - 状态：📋 计划待审阅（v3 最小改动版）；覆盖 3 处门禁（ask 通用审批 / ask edit-write / 子代理转发审批），反馈文字并入拒绝原因回传模型
 
 ## 已完成
 
