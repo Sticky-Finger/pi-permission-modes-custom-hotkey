@@ -16,6 +16,19 @@
   - 分支：`fix/wrap-around-selector`（自 `feat/permission-feedback-dialog` 最新提交 `381cc67` 切出）
   - 状态：🚧 编码完成（新增 `permission-selector.ts` + 15 例单测；5 处门禁迁移到 custom 选择器入口并补回绕集成用例；352 个测试全绿；产物已重建 86,807 B / 30,154 B gzip，待实机验收与提交）
 
+- [ ] [Feature] 新增只读（咨询）模式：只读权限 + 无计划流水线（写入工具移出工具集、allow 规则不可放宽、bash 复用只读白名单、扩展工具默认拒绝 + `allowPlugins` 插件级放行、子代理继承）
+  - 实现计划：[docs/plan/20261107-0847-readonly-mode.md](plan/20261107-0847-readonly-mode.md)
+  - 分支：`feat/readonly-mode`（自 `fix/wrap-around-selector` 最新提交 `93f3fd1` 切出）
+  - 状态：📋 计划已批准（2026-11-07，D1–D6 已定）；待开始实现（本会话只产出计划）
+
+## 已知问题（Bug）
+
+> 已确认、暂不修复的缺陷。修复时移入 `## 进行中`，补实现计划与分支信息。
+
+- [ ] [Fix] 未对 powershell 工具做权限适配
+  - 详情：[docs/issues/20261107-powershell-not-gated.md](issues/20261107-powershell-not-gated.md)
+  - 状态：⏸ 已知，暂不修（2026-11-07）
+
 ## 已完成
 
 - [x] [Feature] 支持自定义快捷键（`shortcuts` 配置段；默认保持 `shift+tab` / `alt+t` / `alt+i` 不变）
