@@ -11,6 +11,11 @@
   - 分支：`feat/permission-feedback-dialog`（自 `feat/configurable-shortcuts` 切出）
   - 状态：🚧 编码完成（新增 `permission-feedback.ts` + 单测 11 例；三处门禁集成测试 14 例；转发协议零改动；产物已重建 84,324 B / 29,352 B gzip，待实机验收与提交）
 
+- [ ] [Fix] 权限选择器首尾循环导航（首项 ↑ 回末项 / 末项 ↓ 回首项；改用 `SelectList` 自绘选择器，计划批准对话框同步循环）
+  - 实现计划：[docs/plan/20261107-0330-wrap-around-selector.md](plan/20261107-0330-wrap-around-selector.md)
+  - 分支：`fix/wrap-around-selector`（自 `feat/permission-feedback-dialog` 最新提交 `381cc67` 切出）
+  - 状态：🚧 编码完成（新增 `permission-selector.ts` + 15 例单测；5 处门禁迁移到 custom 选择器入口并补回绕集成用例；352 个测试全绿；产物已重建 86,807 B / 30,154 B gzip，待实机验收与提交）
+
 ## 已完成
 
 - [x] [Feature] 支持自定义快捷键（`shortcuts` 配置段；默认保持 `shift+tab` / `alt+t` / `alt+i` 不变）

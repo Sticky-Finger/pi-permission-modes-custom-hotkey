@@ -241,14 +241,15 @@ class PlanApprovalComponent implements Component {
     }
 
     if (kb.matches(keyData, "tui.select.up") || keyData === "k") {
-      this.selectedIndex = Math.max(0, this.selectedIndex - 1);
+      this.selectedIndex =
+        (this.selectedIndex - 1 + OPTIONS.length) % OPTIONS.length;
       this.invalidate();
       this.tui.requestRender();
       return;
     }
 
     if (kb.matches(keyData, "tui.select.down") || keyData === "j") {
-      this.selectedIndex = Math.min(OPTIONS.length - 1, this.selectedIndex + 1);
+      this.selectedIndex = (this.selectedIndex + 1) % OPTIONS.length;
       this.invalidate();
       this.tui.requestRender();
       return;

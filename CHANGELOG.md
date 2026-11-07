@@ -14,6 +14,10 @@
   - **Byte-stable artifact**: esbuild is pinned to an exact version (`0.28.2`) and `dist.test.ts` verifies a fresh rebuild matches the committed file byte-for-byte — an audited bundle stays byte-identical across installs (pi updates git packages via `git reset --hard`; no build ever runs in the install dir).
   - `dist/` is committed (git installs would otherwise silently skip the extension — pi never runs builds for git sources) and marked `linguist-generated` in `.gitattributes`.
 - **`package-lock.json` is now committed** (was gitignored) — the dev dependency tree is pinned with integrity hashes; install with `npm ci` and review lock diffs when changing dependencies.
+- **Test discovery ignores nested checkouts** — `vitest.config.ts` excludes `.agents/**`, so a harness worktree checked out inside the repo cannot run a stale copy of the suite (which made `npm test` fail on unrelated dist-freshness checks).
+
+### Fixed
+- **Wrap-around navigation in every permission selector** — the first option no longer stops <kbd>↑</kbd> and the last no longer stops <kbd>↓</kbd>: ↑ on the first jumps to the last, ↓ on the last jumps to the first. Covers the ask-mode approvals (bash / outside-cwd reads / edit-write), the auto-mode tier-3 prompt, subagent approvals, `/mode`, `/undo-outside-writes`, and the plan-ready dialog. The lists render through a custom `SelectList`-backed component (`permission-selector.ts`) instead of `ctx.ui.select`, keeping the native look and the `j` / `k`, `Enter`, `Esc` / `Ctrl+C` behavior, and window long lists to the terminal height. RPC mode keeps pi's native `select` (custom components need a TUI); no permission decision or side effect changed.
 
 ## [3.0.0] - 2026-10-07
 

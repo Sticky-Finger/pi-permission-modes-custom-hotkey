@@ -80,6 +80,10 @@ Example global config:
 
 When a tool call would prompt, you can choose **Allow always (this project)** or **Allow always (global)** to persist an allow rule. Use `/permissions` to list the merged rule set.
 
+### Navigating permission prompts
+
+Every permission list — the ask-mode approvals, the auto-mode tier-3 prompt, subagent approvals, `/mode`, `/undo-outside-writes`, and the plan-ready dialog — uses **wrap-around** navigation: <kbd>↑</kbd> on the first item jumps to the last, <kbd>↓</kbd> on the last jumps back to the first. <kbd>j</kbd> / <kbd>k</kbd> work as <kbd>↓</kbd> / <kbd>↑</kbd> aliases, <kbd>Enter</kbd> confirms, and <kbd>Esc</kbd> / <kbd>Ctrl+C</kbd> cancels. Long option lists scroll inside the terminal instead of overflowing it.
+
 ### Telling the agent what to do differently
 
 Every permission prompt ends with one extra option:
@@ -231,4 +235,4 @@ permission-modes/             # @georgedong32/permission-modes
         └── auto-mode-prompts.md
 ```
 
-Runtime third-party deps: **none** — the shipped `dist/index.js` is a single self-contained file (83 kB / 29 kB gzip) that only imports `node:*` builtins and the pi host packages, which pi provides as virtual modules (peer dependencies: `@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, `@earendil-works/pi-tui`, `typebox`). Build tooling (esbuild, vitest) is dev-only and pinned by the committed lockfile. **Switching permission modes never calls `setModel` / `setThinkingLevel`** — the extension only gates tool-call approvals.
+Runtime third-party deps: **none** — the shipped `dist/index.js` is a single self-contained file (87 kB / 30 kB gzip) that only imports `node:*` builtins and the pi host packages, which pi provides as virtual modules (peer dependencies: `@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, `@earendil-works/pi-tui`, `typebox`). Build tooling (esbuild, vitest) is dev-only and pinned by the committed lockfile. **Switching permission modes never calls `setModel` / `setThinkingLevel`** — the extension only gates tool-call approvals.

@@ -29,6 +29,8 @@ import {
 	writeForwardedRequest,
 	writeForwardedResponse,
 } from "./permission-forwarding.ts"
+import type { Theme } from "@earendil-works/pi-coding-agent"
+import type { TUI } from "@earendil-works/pi-tui"
 
 // ---- minimal fake pi API ------------------------------------------------
 
@@ -80,14 +82,14 @@ interface FakePi {
 }
 
 interface FakeCtxOptions {
-	mode?: string
+	mode?: "tui" | "rpc" | "print" | "json"
 	cwd: string
 	projectRoot?: string | null
 	sessionId?: string
 	sessionName?: string
 	ui?: {
 		select?: (label: string, options: string[]) => Promise<string>
-		custom?: <T>(factory: unknown, options?: unknown) => Promise<T>
+		custom?: (factory: unknown, options?: unknown) => Promise<unknown>
 		notify?: (msg: string) => void
 		editor?: (label: string, val: string) => Promise<string | undefined>
 	}
@@ -248,10 +250,11 @@ function makeCtx(
 	return {
 		cwd: opts.cwd,
 		hasUI: !!opts.ui,
+		mode: opts.mode ?? (opts.ui ? "tui" : "print"),
 		modelRegistry: opts.modelRegistry ?? p.modelRegistry,
 		ui: {
 			select: ui.select ?? (async () => "Block"),
-			custom: ui.custom ?? (async () => "stay" as never),
+			custom: ui.custom ?? (async () => "stay"),
 			notify: ui.notify ?? (() => {}),
 			editor: ui.editor ?? (async () => undefined),
 			setStatus: () => {},
@@ -272,6 +275,44 @@ function makeCtx(
 			...(opts.sessionName ? { getSessionName: () => opts.sessionName } : {}),
 		},
 		model: undefined,
+	}
+}
+
+// ---- selector helpers ---------------------------------------------------
+
+function selectorTui(rows = 40, columns = 120): TUI {
+	return {
+		terminal: { rows, columns, write: () => {} },
+		requestRender: () => {},
+	} as unknown as TUI
+}
+
+function selectorTheme(): Theme {
+	return {
+		fg: (_role: string, text: string) => text,
+		bold: (text: string) => text,
+		italic: (text: string) => text,
+		strikethrough: (text: string) => text,
+		underline: (text: string) => text,
+	} as Theme
+}
+
+/**
+ * Drive a permission gate through the custom (wrap-around) selector and pick
+ * an option by label. `choose` receives the selector's option list, so tests
+ * can assert order/content before returning a choice.
+ */
+function selectorCustom(
+	choose: (options: readonly string[]) => string | undefined,
+): (factory: unknown) => Promise<string | undefined> {
+	return async (factory) => {
+		const component = await (factory as Function)(
+			selectorTui(),
+			selectorTheme(),
+			undefined,
+			() => {},
+		)
+		return choose(component.options as readonly string[])
 	}
 }
 
@@ -317,7 +358,7 @@ describe("permission-modes extension: tool_call gate", () => {
 		it("prompts on edit (inside cwd)", async () => {
 			await switchMode("ask")
 			const result = await callToolCall("edit", { path: "src/foo.ts" }, {
-				select: async () => "Block",
+				custom: async () => "Block",
 			})
 			expect(result).toMatchObject({ block: true })
 		})
@@ -343,7 +384,7 @@ describe("permission-modes extension: tool_call gate", () => {
 		it("prompts on destructive bash", async () => {
 			await switchMode("ask")
 			const result = await callToolCall("bash", { command: "rm -rf /" }, {
-				select: async () => "Block",
+				custom: async () => "Block",
 			})
 			expect(result).toMatchObject({ block: true })
 		})
@@ -562,7 +603,7 @@ describe("permission-modes extension: tool_call gate", () => {
 			const result = await callToolCall(
 				"bash",
 				{ command: "rm .marker" },
-				{ select: async () => "Allow" },
+				{ custom: async () => "Allow" },
 			)
 			expect(result).toBeUndefined()
 		})
@@ -578,7 +619,7 @@ describe("permission-modes extension: tool_call gate", () => {
 			const result = await callToolCall(
 				"write",
 				{ path: "/tmp/outside.txt" },
-				{ select: async () => "Allow" },
+				{ custom: async () => "Allow" },
 			)
 			expect(result).toBeUndefined()
 		})
@@ -787,10 +828,10 @@ describe("permission-modes extension: permission feedback option", () => {
 	it("offers the feedback option as the last entry of the ask-mode selector", async () => {
 		let seenOptions: string[] = []
 		await callToolCall("bash", { command: "rm -rf /" }, {
-			select: async (_label, options) => {
-				seenOptions = options
+			custom: selectorCustom((options) => {
+				seenOptions = [...options]
 				return "Block"
-			},
+			}),
 		})
 		expect(seenOptions).toEqual([
 			"Allow",
@@ -801,9 +842,29 @@ describe("permission-modes extension: permission feedback option", () => {
 		])
 	})
 
+	it("wraps ↑ from the first option to the feedback option and blocks with it", async () => {
+		const result = await callToolCall("bash", { command: "rm -rf /" }, {
+			custom: async (factory) =>
+				new Promise<string | undefined>((resolve) => {
+					Promise.resolve(
+						(factory as Function)(selectorTui(), selectorTheme(), undefined, resolve),
+					).then((component: { handleInput(data: string): void }) => {
+						// First option + ↑ must land on the last (feedback) option.
+						component.handleInput("\x1b[A")
+						component.handleInput("\r")
+					})
+				}),
+			editor: async () => "use the local cache",
+		})
+		expect(result).toMatchObject({
+			block: true,
+			reason: expect.stringContaining("User feedback: use the local cache"),
+		})
+	})
+
 	it("blocks with the feedback text so the model sees it", async () => {
 		const result = await callToolCall("bash", { command: "rm -rf /" }, {
-			select: async () => FEEDBACK_LABEL,
+			custom: async () => FEEDBACK_LABEL,
 			editor: async () => "don't delete system files",
 		})
 		expect(result).toMatchObject({
@@ -815,7 +876,7 @@ describe("permission-modes extension: permission feedback option", () => {
 	it("passes the tool name to the feedback prompt", async () => {
 		let title = ""
 		await callToolCall("bash", { command: "rm -rf /" }, {
-			select: async () => FEEDBACK_LABEL,
+			custom: async () => FEEDBACK_LABEL,
 			editor: async (t) => {
 				title = t
 				return "use the local cache"
@@ -826,7 +887,7 @@ describe("permission-modes extension: permission feedback option", () => {
 
 	it("treats empty feedback as a plain block (no feedback in the reason)", async () => {
 		const result = await callToolCall("bash", { command: "rm -rf /" }, {
-			select: async () => FEEDBACK_LABEL,
+			custom: async () => FEEDBACK_LABEL,
 			editor: async () => "   ",
 		})
 		expect(result).toMatchObject({ block: true, reason: "bash blocked by user" })
@@ -834,7 +895,7 @@ describe("permission-modes extension: permission feedback option", () => {
 
 	it("treats a cancelled feedback prompt as a plain block", async () => {
 		const result = await callToolCall("bash", { command: "rm -rf /" }, {
-			select: async () => FEEDBACK_LABEL,
+			custom: async () => FEEDBACK_LABEL,
 			editor: async () => undefined,
 		})
 		expect(result).toMatchObject({ block: true, reason: "bash blocked by user" })
@@ -842,12 +903,12 @@ describe("permission-modes extension: permission feedback option", () => {
 
 	it("keeps every other option behaviour unchanged", async () => {
 		const allowed = await callToolCall("bash", { command: "rm -rf /" }, {
-			select: async () => "Allow",
+			custom: async () => "Allow",
 		})
 		expect(allowed).toBeUndefined()
 
 		const blocked = await callToolCall("bash", { command: "rm -rf /" }, {
-			select: async () => "Block",
+			custom: async () => "Block",
 		})
 		expect(blocked).toMatchObject({ block: true, reason: "bash blocked by user" })
 	})
@@ -855,10 +916,10 @@ describe("permission-modes extension: permission feedback option", () => {
 	it("works on the ask-mode edit/write gate and keeps the path in the reason", async () => {
 		let seenOptions: string[] = []
 		const result = await callToolCall("edit", { path: "src/foo.ts" }, {
-			select: async (_label, options) => {
-				seenOptions = options
+			custom: selectorCustom((options) => {
+				seenOptions = [...options]
 				return FEEDBACK_LABEL
-			},
+			}),
 			editor: async () => "edit the file under src/ instead",
 		})
 		expect(seenOptions).toEqual([
@@ -879,7 +940,7 @@ describe("permission-modes extension: permission feedback option", () => {
 
 	it("works on the outside-cwd read gate", async () => {
 		const result = await callToolCall("read", { path: "/etc/passwd" }, {
-			select: async () => FEEDBACK_LABEL,
+			custom: async () => FEEDBACK_LABEL,
 			editor: async () => "read the local config instead",
 		})
 		expect(result).toMatchObject({
@@ -892,7 +953,7 @@ describe("permission-modes extension: permission feedback option", () => {
 		pi.flags["permission-mode"] = "auto"
 		await pi.simulateSessionStart(realProjectRoot)
 		const result = await callToolCall("read", { path: ".git/config" }, {
-			select: async () => FEEDBACK_LABEL,
+			custom: async () => FEEDBACK_LABEL,
 			editor: async () => "read the tracked file instead",
 		})
 		expect(result).toMatchObject({
@@ -1023,7 +1084,7 @@ describe("bypass mode: outside-cwd write tracking", () => {
 		await switchMode("bypass")
 		const ctx = makeCtx(pi, {
 			cwd: realProjectRoot,
-			ui: { notify: (m: string) => notifications.push(m), select: async () => "Block" },
+			ui: { notify: (m: string) => notifications.push(m), custom: async () => "Block" },
 		})
 		await pi.simulateToolCall("write", { path: outsideFile }, ctx)
 		expect(notifications.some((n) => n.includes("tracked"))).toBe(true)
@@ -1035,7 +1096,7 @@ describe("bypass mode: outside-cwd write tracking", () => {
 		const ctx = makeCtx(pi, {
 			cwd: realProjectRoot,
 			ui: {
-				select: async () => {
+				custom: async () => {
 					prompted = true
 					return "Block"
 				},
@@ -1125,10 +1186,10 @@ describe("/outside-writes and /undo-outside-writes commands", () => {
 		const ctx = makeCtx(pi, {
 			cwd,
 			ui: {
-				select: async (_label: string, options: string[]) => {
-					selectorOptions = options
-					return options[0]!
-				},
+				custom: selectorCustom((options) => {
+					selectorOptions = [...options]
+					return options[0]
+				}),
 				notify: () => {},
 			},
 		})
@@ -1142,7 +1203,7 @@ describe("/outside-writes and /undo-outside-writes commands", () => {
 		const notifications: string[] = []
 		await pi.simulateCommand("undo-outside-writes", "all", makeCtx(pi, {
 			cwd,
-			ui: { notify: (m: string) => notifications.push(m), select: async () => "Block" },
+			ui: { notify: (m: string) => notifications.push(m), custom: async () => "Block" },
 		}))
 		expect(notifications.some((n) => n.includes("No tracked"))).toBe(true)
 	})
@@ -1401,10 +1462,10 @@ describe("permission-modes: subagent ask forwarding", () => {
 	it("parent poller does not start under PI_SUBAGENT_CHILD=1", async () => {
 		process.env.PI_SUBAGENT_CHILD = "1"
 		process.env.PI_SUBAGENT_PARENT_SESSION = "ignored"
-		let selectCalls = 0
+		let selectorCalls = 0
 		await pi.simulateSessionStart(process.cwd(), {
-			select: async () => {
-				selectCalls++
+			custom: async () => {
+				selectorCalls++
 				return "Allow"
 			},
 		})
@@ -1418,9 +1479,9 @@ describe("permission-modes: subagent ask forwarding", () => {
 			input: {},
 		})
 		// Force session id mismatch — even if poller started with wrong id it wouldn't match.
-		// Main assert: child process must not call select for inbox.
+		// Main assert: child process must not open a selector for inbox.
 		await new Promise((r) => setTimeout(r, 400))
-		expect(selectCalls).toBe(0)
+		expect(selectorCalls).toBe(0)
 	})
 })
 
@@ -1460,14 +1521,14 @@ describe("permission-modes: subagent feedback option (parent answers)", () => {
 
 	/** Drive the parent-side handler through a real forwarded request. */
 	async function answerForwardedRequest(opts: {
-		select: (label: string, options: string[]) => Promise<string>
+		choose: (options: readonly string[]) => string | undefined
 		editor?: (label: string, val: string) => Promise<string | undefined>
 		requesterAgentName?: string
 	}) {
 		const parentSessionId = "parent-fb-1"
 		await pi.simulateSessionStart(
 			process.cwd(),
-			{ select: opts.select, editor: opts.editor },
+			{ custom: selectorCustom(opts.choose), editor: opts.editor },
 			undefined,
 			parentSessionId,
 		)
@@ -1499,8 +1560,8 @@ describe("permission-modes: subagent feedback option (parent answers)", () => {
 	it("offers the feedback option to the parent and forwards the text back", async () => {
 		let seenOptions: string[] = []
 		const { response } = await answerForwardedRequest({
-			select: async (_label, options) => {
-				seenOptions = options
+			choose: (options) => {
+				seenOptions = [...options]
 				return "No, and tell the subagent what to do differently"
 			},
 			editor: async () => "use the local test fixture instead",
@@ -1523,8 +1584,8 @@ describe("permission-modes: subagent feedback option (parent answers)", () => {
 		let seenOptions: string[] = []
 		let title = ""
 		const { response } = await answerForwardedRequest({
-			select: async (_label, options) => {
-				seenOptions = options
+			choose: (options) => {
+				seenOptions = [...options]
 				return "No, and tell scout what to do differently"
 			},
 			editor: async (t) => {
@@ -1540,7 +1601,7 @@ describe("permission-modes: subagent feedback option (parent answers)", () => {
 
 	it("treats empty feedback as a plain block", async () => {
 		const { response } = await answerForwardedRequest({
-			select: async () => "No, and tell the subagent what to do differently",
+			choose: () => "No, and tell the subagent what to do differently",
 			editor: async () => "  ",
 		})
 		expect(response.approved).toBe(false)
@@ -1644,7 +1705,7 @@ describe("permission-modes extension: configurable shortcuts", () => {
 				cwd: process.cwd(),
 				ui: {
 					notify: (msg: string) => notifications.push(msg),
-					select: async () => "Block",
+					custom: async () => "Block",
 				},
 			}),
 		)

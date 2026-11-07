@@ -108,6 +108,9 @@ import {
   runPlanApprovalDialog,
 } from "./plan-approval-dialog.ts";
 import {
+  showPermissionSelector,
+} from "./permission-selector.ts";
+import {
   createForwardingPoller,
   defaultAgentDir,
   deriveRequesterAgentName,
@@ -308,7 +311,7 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
       }
       return undefined;
     }
-    const choice = await ctx.ui.select(`Allow ${tool}? ${label}`, [
+    const choice = await showPermissionSelector(ctx, `Allow ${tool}? ${label}`, [
       "Allow",
       "Allow always (this project)",
       "Allow always (global)",
@@ -919,7 +922,8 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
         return;
       }
       if (!ctx.hasUI) return;
-      const choice = await ctx.ui.select(
+      const choice = await showPermissionSelector(
+        ctx,
         "Select mode:",
         MODE_CYCLE.map((m) => MODE_META[m].label),
       );
@@ -1222,7 +1226,8 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
         return;
       }
       const ordered = [...allSnaps].reverse();
-      const choice = await ctx.ui.select(
+      const choice = await showPermissionSelector(
+        ctx,
         "Restore which tracked outside-cwd write? (newest first)",
         ordered.map((s) =>
           formatSnapshotForDisplay(s, isExternallyModified(s, allSnaps)),
@@ -1514,7 +1519,7 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
         if (!ctx.hasUI) {
           return promptApproval(ctx, tool, `on ${pathVal}`, input);
         }
-        const choice = await ctx.ui.select(`Allow ${tool} on ${pathVal}?`, [
+        const choice = await showPermissionSelector(ctx, `Allow ${tool} on ${pathVal}?`, [
           "Allow",
           "Allow always (this project)",
           "Allow always (global)",
@@ -1934,7 +1939,7 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
     const feedbackOption = buildFeedbackOptionLabel(feedbackTarget);
 
     try {
-      const choice = await ctx.ui.select(title, [
+      const choice = await showPermissionSelector(ctx, title, [
         "Allow",
         "Allow always (this project)",
         "Allow always (global)",

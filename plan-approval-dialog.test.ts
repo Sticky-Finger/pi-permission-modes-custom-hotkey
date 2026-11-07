@@ -208,6 +208,41 @@ describe("plan-approval-dialog component", () => {
     expect(afterArrow).not.toContain("plan 1-");
   });
 
+  it("wraps the option selection from the first item up to the last", () => {
+    const tui = makeMockTui(24);
+    const component = createPlanApprovalComponent({
+      planContent: "**Plan:**\n1. Implement the first feature step",
+      stepCount: 1,
+      theme: makeMockTheme(),
+      tui,
+      done: () => {},
+    });
+
+    expect(component.render(80).join("\n")).toContain("→ Execute the plan");
+    component.handleInput?.("\x1b[A"); // ↑ from the first option
+    const afterUp = component.render(80).join("\n");
+    expect(afterUp).toContain("→ Stay in plan mode");
+    expect(afterUp).not.toContain("→ Execute the plan");
+  });
+
+  it("wraps the option selection from the last item down to the first", () => {
+    const tui = makeMockTui(24);
+    const component = createPlanApprovalComponent({
+      planContent: "**Plan:**\n1. Implement the first feature step",
+      stepCount: 1,
+      theme: makeMockTheme(),
+      tui,
+      done: () => {},
+    });
+
+    component.handleInput?.("k"); // ↑ wraps to the last option
+    expect(component.render(80).join("\n")).toContain("→ Stay in plan mode");
+    component.handleInput?.("j"); // ↓ wraps back to the first option
+    const afterDown = component.render(80).join("\n");
+    expect(afterDown).toContain("→ Execute the plan");
+    expect(afterDown).not.toContain("→ Stay in plan mode");
+  });
+
   it("mouse wheel scrolls the plan content", () => {
     const tui = makeMockTui(24);
     const planContent = `**Plan:**\n${Array.from({ length: 80 }, (_, i) => `${i + 1}. Implement feature number ${i + 1}`).join("\n")}`;
