@@ -1,6 +1,12 @@
 ## [Unreleased]
 
 ### Added
+- **Read Only mode (`/readonly`, `--permission-mode readonly`)** — a fifth permission mode for analysis and consulting: read everything, change nothing, produce no plan. Plan: [docs/plan/20261107-0847-readonly-mode.md](docs/plan/20261107-0847-readonly-mode.md).
+  - `edit` / `write` are removed from the active tool set **and** blocked at the gate; `bash` stays on the existing read-only allowlist; `powershell` and every unlisted extension/MCP tool are denied. `read` / `grep` / `find` / `ls` are allowed (including outside cwd) and never prompt.
+  - **Hard ceiling**: the gate runs before configured permission rules, so `allow` rules cannot widen Read Only; `deny` rules still apply.
+  - **No plan side effects**: no `plan.md`, no plan-approval dialog, no step extraction / `[DONE:n]` tracking, no automatic mode switch. The injected prompt is a static four-line "answer in the conversation, don't produce a plan unless asked" block.
+  - **`readonly.allowPlugins`** in `~/.pi/agent/permission-modes.json` exempts a whole plugin (e.g. `["pi-web-access"]`) so web tools keep working; matching is exact after normalizing `npm:` / `git:` prefixes and version/ref suffixes, with no substring or glob, and no plugin or tool name hard-coded in the extension.
+  - Cycle order is now `readonly → ask → plan → auto → bypass`; subagents inherit `readonly` like any other mode. Tool-set changes add/remove `edit`/`write` by name instead of snapshotting the whole set, so extensions that manage their own tools (pi-web-access `web_enable`) are not clobbered.
 - **Permission feedback option** — every permission approval prompt now ends with `No, and tell the agent what to do differently`. Picking it opens pi's native inline editor (`Tell the agent how to proceed with <tool>:`); the call is blocked and the typed text rides along with the denial reason (`bash blocked by user. User feedback: ...`), so the model sees both the rejection and the requested change.
   - Covers the ask-mode approvals (bash / outside-cwd reads / edit-write), the auto-mode tier-3 prompt, and the subagent approval the parent session answers on a child's behalf (the option names the subagent: `No, and tell scout what to do differently`).
   - Empty input, a cancelled editor, or a cancelled prompt fall back to a plain block — the feedback path never lets a call through.
@@ -17,6 +23,7 @@
 - **Test discovery ignores nested checkouts** — `vitest.config.ts` excludes `.agents/**`, so a harness worktree checked out inside the repo cannot run a stale copy of the suite (which made `npm test` fail on unrelated dist-freshness checks).
 
 ### Fixed
+- **`dist.test.ts` no longer flakes under parallel load** — the dynamic-import test (`loads and default-exports the extension factory`) now has a 20 s timeout; importing the bundle plus pi host packages took up to ~4.3 s with all 22 test files running, close enough to the 5 s default to fail intermittently.
 - **Wrap-around navigation in every permission selector** — the first option no longer stops <kbd>↑</kbd> and the last no longer stops <kbd>↓</kbd>: ↑ on the first jumps to the last, ↓ on the last jumps to the first. Covers the ask-mode approvals (bash / outside-cwd reads / edit-write), the auto-mode tier-3 prompt, subagent approvals, `/mode`, `/undo-outside-writes`, and the plan-ready dialog. The lists render through a custom `SelectList`-backed component (`permission-selector.ts`) instead of `ctx.ui.select`, keeping the native look and the `j` / `k`, `Enter`, `Esc` / `Ctrl+C` behavior, and window long lists to the terminal height. RPC mode keeps pi's native `select` (custom components need a TUI); no permission decision or side effect changed.
 
 ## [3.0.0] - 2026-10-07

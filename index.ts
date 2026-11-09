@@ -3,8 +3,10 @@
  *
  * Claude-Code-style permission modes for the pi coding agent.
  *
- * Four modes (Shift+Tab by default — configurable via `shortcuts` in
- * ~/.pi/agent/permission-modes.json): ask → plan → auto → bypass → ask
+ * Five modes (Shift+Tab by default — configurable via `shortcuts` in
+ * ~/.pi/agent/permission-modes.json):
+ *   readonly → ask → plan → auto → bypass → readonly
+ *   - readonly Read-only analysis/consulting: no edits, no plan pipeline.
  *   - ask     Manual approval for edits, outside-cwd access, mutating bash.
  *   - plan    Read-only; only plan.md may be written.
  *   - auto    Tiered auto-approve + optional built-in classifier + risk blacklist.
@@ -35,6 +37,7 @@ import {
   loadPermissionModesConfig,
   resolveAutoModeConfig,
   resolveClassifierConfig,
+  resolveReadonlyAllowPlugins,
   resolveShortcuts,
 } from "./config.ts";
 import {
@@ -127,12 +130,18 @@ import {
   applyInheritedModeForChild,
   publishInheritedPermissionMode,
 } from "./mode-inherit.ts";
+import {
+  isPluginAllowed,
+  READONLY_READ_TOOLS,
+  READONLY_WRITE_TOOLS,
+} from "./readonly-plugins.ts";
 
 type Mode = PermissionMode;
 
-const MODE_CYCLE: Mode[] = ["ask", "plan", "auto", "bypass"];
+const MODE_CYCLE: Mode[] = ["readonly", "ask", "plan", "auto", "bypass"];
 
 const MODE_META: Record<Mode, { icon: string; label: string; role: string }> = {
+  readonly: { icon: "◐", label: "Read Only", role: "success" },
   ask: { icon: "●", label: "Ask", role: "muted" },
   plan: { icon: "⏸", label: "Plan", role: "accent" },
   auto: { icon: "▶", label: "Auto", role: "warning" },
@@ -161,6 +170,11 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
   let pendingComplianceInject = false;
   let complianceCategory = "";
   let toolsBeforePlanMode: string[] | undefined;
+  /** Tools Read Only mode removed from the active set, restored by name on exit. */
+  let readonlyRemovedTools: string[] = [];
+  let readonlyAllowPlugins: string[] = resolveReadonlyAllowPlugins(
+    loadPermissionModesConfig(),
+  );
   let planTodos: TodoItem[] = [];
   let projectRoot: string | null = null;
   let classifierConfig = resolveClassifierConfig(loadPermissionModesConfig());
@@ -608,15 +622,38 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
   }
 
   // ---- tool gating -------------------------------------------------------
+  /**
+   * Give back the tools Read Only mode hid, by NAME (never a whole-set
+   * snapshot): another extension may have changed the active set meanwhile,
+   * and restoring a snapshot would undo its work.
+   */
+  function releaseReadonlyTools(): void {
+    if (!readonlyRemovedTools.length) return;
+    const active = pi.getActiveTools();
+    pi.setActiveTools([...new Set([...active, ...readonlyRemovedTools])]);
+    readonlyRemovedTools = [];
+  }
+
+  /** Hide mutating built-ins while in Read Only mode, remembering their names. */
+  function applyReadonlyToolLayer(): void {
+    if (currentMode !== "readonly") return;
+    const active = pi.getActiveTools();
+    const hidden = active.filter((t) => READONLY_WRITE_TOOLS.has(t));
+    if (!hidden.length) return;
+    pi.setActiveTools(active.filter((t) => !READONLY_WRITE_TOOLS.has(t)));
+    readonlyRemovedTools = [...new Set([...readonlyRemovedTools, ...hidden])];
+  }
+
   function applyToolRestrictions(): void {
+    // Release first so the plan layer's snapshot sees the restored set.
+    if (currentMode !== "readonly") releaseReadonlyTools();
+
     if (planExecuting) {
       if (toolsBeforePlanMode !== undefined) {
         pi.setActiveTools(toolsBeforePlanMode);
         toolsBeforePlanMode = undefined;
       }
-      return;
-    }
-    if (currentMode === "plan") {
+    } else if (currentMode === "plan") {
       if (toolsBeforePlanMode === undefined)
         toolsBeforePlanMode = pi.getActiveTools();
       const kept = toolsBeforePlanMode.filter((t) => !PLAN_DISABLED.has(t));
@@ -625,6 +662,8 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
       pi.setActiveTools(toolsBeforePlanMode);
       toolsBeforePlanMode = undefined;
     }
+
+    applyReadonlyToolLayer();
   }
 
   // ---- mode switching ----------------------------------------------------
@@ -879,7 +918,7 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
   }
 
   // ---- commands / shortcut / flag ---------------------------------------
-  for (const mode of ["ask", "plan", "auto", "bypass"] as Mode[]) {
+  for (const mode of MODE_CYCLE) {
     pi.registerCommand(mode, {
       description: `Switch to ${MODE_META[mode].label} mode`,
       handler: async (_args, ctx) => setMode(mode, ctx),
@@ -909,7 +948,7 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
 
   pi.registerCommand("mode", {
     description:
-      "Show or set the permission mode (ask | plan | auto | bypass)",
+      "Show or set the permission mode (readonly | ask | plan | auto | bypass)",
     handler: async (args, ctx) => {
       const arg = (args ?? "").trim();
       if (arg && (MODE_CYCLE as string[]).includes(arg)) {
@@ -1282,7 +1321,7 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
   }
 
   registerConfiguredShortcut("cycleMode", SHORTCUTS.cycleMode, {
-    description: "Cycle mode: Ask → Plan → Auto → Bypass",
+    description: "Cycle mode: Read Only → Ask → Plan → Auto → Bypass",
     handler: async (ctx) => cycleMode(ctx),
   });
 
@@ -1335,7 +1374,7 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
   // flag must use a distinct name to avoid being shadowed at parse time.
   pi.registerFlag("permission-mode", {
     description:
-      "Start in a permission mode: ask, plan, auto, or bypass (accepts 'default' as alias for 'ask')",
+      "Start in a permission mode: readonly, ask, plan, auto, or bypass (accepts 'default' as alias for 'ask')",
     type: "string",
     default: "ask",
   });
@@ -1359,6 +1398,81 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
     return undefined;
   }
 
+  /** Load-time `sourceInfo.source` of a tool, e.g. `npm:pi-web-access`. */
+  function toolSource(tool: string): string | undefined {
+    try {
+      const getAll = (pi as any).getAllTools;
+      if (typeof getAll !== "function") return undefined;
+      const infos = getAll.call(pi) as Array<{
+        name?: string;
+        sourceInfo?: { source?: string };
+      }>;
+      return infos.find((info) => info?.name === tool)?.sourceInfo?.source;
+    } catch {
+      return undefined;
+    }
+  }
+
+  function readonlyDenialReason(tool: string, source: string | undefined): string {
+    if (READONLY_WRITE_TOOLS.has(tool)) {
+      return `Read Only mode: writes are blocked (${tool}). Switch mode (/ask) to make changes.`;
+    }
+    if (!source || source === "builtin") {
+      return `Read Only mode: ${tool} is not available. Switch mode to use it.`;
+    }
+    return (
+      `Read Only mode: tool "${tool}" (plugin: ${source}) is blocked. ` +
+      `If that plugin is read-only, add "${source}" to readonly.allowPlugins in ` +
+      `~/.pi/agent/permission-modes.json.`
+    );
+  }
+
+  /**
+   * Read Only gate. Runs BEFORE configured permission rules so an allow rule
+   * can never widen the mode; deny rules still win.
+   */
+  async function gateReadonly(
+    ctx: ExtensionContext,
+    tool: string,
+    input: Record<string, unknown>,
+  ): Promise<Block> {
+    const verdict = evaluateToolPermission(
+      tool,
+      input,
+      ctx.cwd,
+      mergedPermissionRules,
+    );
+    if (verdict.behavior === "deny") {
+      return {
+        block: true,
+        reason: `Denied by permission rule [${verdict.source}]: ${verdict.rule}`,
+      };
+    }
+
+    if (READONLY_READ_TOOLS.has(tool)) return undefined;
+
+    if (tool === "bash") {
+      const cmd = String(input.command ?? "");
+      if (isSafeCommand(cmd)) return undefined;
+      return {
+        block: true,
+        reason: `Read Only mode: read-only commands only.\n  Command: ${cmd}`,
+      };
+    }
+
+    if (READONLY_WRITE_TOOLS.has(tool)) {
+      return { block: true, reason: readonlyDenialReason(tool, undefined) };
+    }
+
+    const source = toolSource(tool);
+    // Built-in tools (e.g. powershell) are never plugin-exempt.
+    if (source === "builtin") {
+      return { block: true, reason: readonlyDenialReason(tool, source) };
+    }
+    if (isPluginAllowed(source, readonlyAllowPlugins)) return undefined;
+    return { block: true, reason: readonlyDenialReason(tool, source) };
+  }
+
   // ---- tool_call gate ----------------------------------------------------
   pi.on("tool_call", async (event, ctx): Promise<Block> => {
     const tool = event.toolName;
@@ -1371,6 +1485,12 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
         trackOutsideWriteIfNeeded(ctx, tool, String(input.path ?? ""));
       }
       return undefined;
+    }
+
+    // READ ONLY: hard ceiling — evaluated before configured permission rules
+    // so an allow rule cannot widen it (deny rules still apply inside).
+    if (currentMode === "readonly") {
+      return gateReadonly(ctx, tool, input);
     }
 
     const permResult = await applyConfiguredPermissionRules(ctx, tool, input);
@@ -1590,6 +1710,7 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
 
     classifierConfig = resolveClassifierConfig(loadPermissionModesConfig());
     autoModeConfig = resolveAutoModeConfig(loadPermissionModesConfig());
+    readonlyAllowPlugins = resolveReadonlyAllowPlugins(loadPermissionModesConfig());
     reloadMergedPermissionRules(ctx.cwd);
 
     const systemPromptBase =
@@ -1879,6 +2000,7 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
 
     classifierConfig = resolveClassifierConfig(loadPermissionModesConfig());
     autoModeConfig = resolveAutoModeConfig(loadPermissionModesConfig());
+    readonlyAllowPlugins = resolveReadonlyAllowPlugins(loadPermissionModesConfig());
     if (currentMode === "auto") {
       classifierDenialState = createDenialTrackingState();
     }

@@ -95,10 +95,21 @@ export function isUnsafeShortcutKey(key: string): boolean {
 	return /^(shift\+)?[a-z0-9]$/.test(k)
 }
 
+export interface ReadonlyModeConfig {
+	/**
+	 * Plugin specs exempted from Read Only mode's default-deny, e.g.
+	 * `["pi-web-access"]` or `["npm:pi-web-access"]`. Exact match after
+	 * normalization; no substring or glob.
+	 */
+	allowPlugins?: string[]
+}
+
 export interface PermissionModesConfig {
 	classifier?: Partial<ClassifierConfig>
 	/** CC auto-mode classifier allow / soft_deny / environment bullets. */
 	autoMode?: AutoModeRules
+	/** Read Only mode (`/readonly`) settings. */
+	readonly?: ReadonlyModeConfig
 	permissions?: {
 		allow?: string[]
 		deny?: string[]
@@ -155,6 +166,20 @@ export function resolveAutoModeConfig(
 		return undefined
 	}
 	return rules
+}
+
+/**
+ * Plugin specs allowed in Read Only mode. Empty by default — Read Only denies
+ * every non-builtin tool until the user opts a plugin in.
+ */
+export function resolveReadonlyAllowPlugins(
+	config: PermissionModesConfig,
+): string[] {
+	const list = config.readonly?.allowPlugins
+	if (!Array.isArray(list)) return []
+	return list.filter(
+		(entry): entry is string => typeof entry === "string" && entry.trim().length > 0,
+	)
 }
 
 export function loadPermissionModesConfig(): PermissionModesConfig {

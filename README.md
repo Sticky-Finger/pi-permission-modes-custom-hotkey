@@ -3,18 +3,19 @@
 [![npm version](https://img.shields.io/npm/v/@georgedong32/permission-modes)](https://www.npmjs.com/package/@georgedong32/permission-modes)
 [![License](https://img.shields.io/npm/l/@georgedong32/permission-modes)](LICENSE)
 
-Claude-Code-style **permission modes** for the [pi coding agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent). Four modes, cycled with **Shift+Tab**, that control how tool calls get approved. v2.0.0 adds **bypass**, a built-in **auto classifier**, **plan.md** file driver, and system-prompt anchor injection.
+Claude-Code-style **permission modes** for the [pi coding agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent). Five modes, cycled with **Shift+Tab**, that control how tool calls get approved. v2.0.0 adds **bypass**, a built-in **auto classifier**, **plan.md** file driver, and system-prompt anchor injection; the latest addition is **Read Only** for pure analysis/consulting.
 
 ## Modes
 
 | Mode | edit / write | reads outside cwd | bash | notes |
 |---|---|---|---|---|
+| **readonly** `◐` | removed from the tool set + blocked | allowed | read-only allowlist | no plan file, no plan dialog; plugin tools denied unless allowlisted |
 | **ask** `●` | prompt (`Allow` / `Allow all → bypass` / `Block`) | prompt | mutating commands prompt | one-line reminder on mode switch |
 | **plan** `⏸` | only `plan.md` | allowed | read-only allowlist | plan file at `.pi/projects/<id>/plan.md` |
 | **auto** `▶` | cwd writes auto; risky ops → classifier/blacklist | auto | tiered | optional classifier in `permission-modes.json` |
 | **bypass** `⚡` | all auto-approved (tracked outside cwd) | auto | auto | security reminder on switch + compact |
 
-**Cycle (Shift+Tab):** ask → plan → auto → bypass → ask.
+**Cycle (Shift+Tab):** readonly → ask → plan → auto → bypass → readonly.
 
 When there is no interactive UI (`pi -p`, `--mode json`), anything that would prompt is **blocked** instead of silently allowed — unless the process is a **pi-subagents child** with `PI_SUBAGENT_PARENT_SESSION` set; then the ask is forwarded to the parent session UI (see below).
 
@@ -37,7 +38,7 @@ When permission-modes would prompt and `!ctx.hasUI`:
 
 ### Subagent inherits parent mode
 
-The interactive session writes `PERMISSION_MODES_INHERITED_MODE` (`ask` | `plan` | `auto` | `bypass`) into the process environment whenever the mode changes (and again on each `before_agent_start`). pi-subagents merges `process.env` into child spawns (and passes `--permission-mode` when that env is set), so headless children start in the **same mode** as the parent (e.g. parent bypass → child auto-approves; no approval popups).
+The interactive session writes `PERMISSION_MODES_INHERITED_MODE` (`readonly` | `ask` | `plan` | `auto` | `bypass`) into the process environment whenever the mode changes (and again on each `before_agent_start`). pi-subagents merges `process.env` into child spawns (and passes `--permission-mode` when that env is set), so headless children start in the **same mode** as the parent (e.g. parent bypass → child auto-approves; parent readonly → child cannot write either).
 
 ### Auto classifier (optional)
 
@@ -111,7 +112,7 @@ bash blocked by user. User feedback: use the local VERSION file instead
 
 | Kind | Name | Behavior |
 |---|---|---|
-| Command | `/ask`, `/plan`, `/auto` | switch to that mode (`/default` also works as alias) |
+| Command | `/readonly`, `/ask`, `/plan`, `/auto`, `/bypass` | switch to that mode (`/default` also works as alias) |
 | Command | `/mode [name]` | set the given mode, or pick from a list |
 | Command | `/auto-depth <n>` | cap auto-mode follow-ups (`0` = unlimited; default 20) |
 | Shortcut | `Shift+Tab` | cycle modes (default — configurable, see below) |
@@ -119,7 +120,7 @@ bash blocked by user. User feedback: use the local VERSION file instead
 | Command | `/permissions` | list merged allow/deny/ask rules |
 | Command | `/outside-writes` | list tracked outside-cwd writes (read-only) |
 | Command | `/undo-outside-writes` | restore outside-cwd writes (selector, `all`, or `--list`) |
-| Flag | `--permission-mode <name>` | start in a mode (accepts `ask`, `plan`, `auto`, or `default` as alias; default `ask`) |
+| Flag | `--permission-mode <name>` | start in a mode (accepts `readonly`, `ask`, `plan`, `auto`, `bypass`, or `default` as alias; default `ask`) |
 
 > The start-mode flag is `--permission-mode` (not `--mode`) because pi already has a built-in `--mode` for output format (text/json/rpc).
 
@@ -155,6 +156,28 @@ In **auto mode**, `edit` and `write` calls to paths outside the working director
 
 Snapshots capture the file's pre-write content (or `null` if the file didn't exist). They persist across sessions until you undo them. The snapshot cap is 100 entries (oldest are evicted; you get a notification).
 
+### Read Only mode
+
+`/readonly` (or `--permission-mode readonly`) is for **analysis and consulting**: the agent inspects the repo and answers in the conversation, without producing code or a plan.
+
+- **No writes.** `edit` and `write` are removed from the active tool set *and* blocked at the gate. `bash` is limited to the read-only allowlist; `powershell` is not available.
+- **No plan side effects.** It never creates/reads `plan.md`, never opens the plan-approval dialog, never extracts steps or tracks `[DONE:n]`, and never switches modes on its own. The injected prompt is short and static: answer in chat, don't produce an implementation plan unless asked, don't close by offering to implement.
+- **Reads are never interrupted.** `read` / `grep` / `find` / `ls` are allowed, including outside the working directory — same as plan mode.
+- **Read Only is a hard ceiling.** Configured `allow` rules cannot widen it (the gate runs before rule evaluation); `deny` rules still apply.
+- **Other tools are denied by default.** Only plugins you explicitly allow are exempt:
+
+```json
+{
+  "readonly": {
+    "allowPlugins": ["pi-web-access"]
+  }
+}
+```
+
+Entries are matched **exactly** (case-insensitive) against the plugin's source — `pi-web-access`, `npm:pi-web-access`, and `git:…@ref` forms all normalize, and a short entry such as `pi` will **not** match `pi-web-access`. Allowlisting exempts every tool that plugin registers (so `web_enable` / `web_search` / `fetch_content` work and survive the per-turn tool-set cleanup). Leave the list empty to deny every non-builtin tool.
+
+**Boundary — this is not a sandbox.** pi has no built-in sandbox, so Read Only is enforced at the tool-call and tool-set layers only. It is a guard against *accidental* edits, not against malicious code: an allowlisted plugin's own write tools are not inspected, and Read Only means "does not modify your project files" — network tools may still cache under `~/.pi/agent/` or `/tmp`.
+
 ### Plan mode flow
 
 In plan mode the agent explores read-only and emits a numbered list under a `Plan:` header. On completion you choose:
@@ -168,7 +191,7 @@ In plan mode the agent explores read-only and emits a numbered list under a `Pla
 - A custom **adaptive footer** (v1.1.6): wide terminals show **cwd [git-branch] · context usage · model** on line 1 and **mode** on line 2; narrow terminals reflow to two compact lines with truncation.
 - **Context usage** in the footer shows `tokens/contextWindow percent` (e.g. `42k/200k 21.0%`; large counts use `M`).
 - While the agent is streaming, the working indicator shows live **token / tok-s / cost / % context** stats; it reverts to the default loader when idle.
-- Mode colors: ask = muted, plan = accent, auto = warning. The colored status pill was removed in v1.1.6 — mode is shown in the footer only.
+- Mode colors: readonly = success, ask = muted, plan = accent, auto = warning. The colored status pill was removed in v1.1.6 — mode is shown in the footer only.
 
 Current mode and the auto-follow-up depth **persist** across `/reload` and session resume.
 
@@ -219,6 +242,7 @@ permission-modes/             # @georgedong32/permission-modes
 ├── package-lock.json         # dev dependency tree, committed (exact versions + integrity)
 ├── index.ts                  # main extension source (default-exported factory)
 ├── utils.ts                  # bash allowlist + Plan: + [DONE:n] helpers
+├── readonly-plugins.ts       # Read Only: plugin allowlist matching + tool classification
 ├── scripts/build.js          # esbuild bundler + build gates (single-file dist)
 ├── dist/index.js             # COMMITTED build artifact — what pi actually loads
 ├── types/raw.d.ts            # editor types for `*.txt?raw` imports
@@ -230,9 +254,10 @@ permission-modes/             # @georgedong32/permission-modes
 └── docs/
     ├── PRD.md                # product requirements
     └── prompts/              # mode-specific prompt context
+        ├── readonly-mode-prompts.md
         ├── ask-mode-prompts.md
         ├── plan-mode-prompts.md
         └── auto-mode-prompts.md
 ```
 
-Runtime third-party deps: **none** — the shipped `dist/index.js` is a single self-contained file (87 kB / 30 kB gzip) that only imports `node:*` builtins and the pi host packages, which pi provides as virtual modules (peer dependencies: `@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, `@earendil-works/pi-tui`, `typebox`). Build tooling (esbuild, vitest) is dev-only and pinned by the committed lockfile. **Switching permission modes never calls `setModel` / `setThinkingLevel`** — the extension only gates tool-call approvals.
+Runtime third-party deps: **none** — the shipped `dist/index.js` is a single self-contained file (89 kB / 31 kB gzip) that only imports `node:*` builtins and the pi host packages, which pi provides as virtual modules (peer dependencies: `@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, `@earendil-works/pi-tui`, `typebox`). Build tooling (esbuild, vitest) is dev-only and pinned by the committed lockfile. **Switching permission modes never calls `setModel` / `setThinkingLevel`** — the extension only gates tool-call approvals.

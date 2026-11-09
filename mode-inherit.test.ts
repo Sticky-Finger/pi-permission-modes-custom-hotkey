@@ -26,6 +26,15 @@ describe("mode-inherit", () => {
 		expect(resolveInheritedPermissionMode()).toBe("bypass");
 	});
 
+	it("inherits readonly so a child cannot write behind a read-only parent", () => {
+		delete process.env[SUBAGENT_CHILD_ENV];
+		publishInheritedPermissionMode("readonly");
+		expect(resolveInheritedPermissionMode()).toBe("readonly");
+
+		process.env[SUBAGENT_CHILD_ENV] = "1";
+		expect(applyInheritedModeForChild()).toBe("readonly");
+	});
+
 	it("publishInheritedPermissionMode is no-op in child", () => {
 		process.env[SUBAGENT_CHILD_ENV] = "1";
 		process.env[PERMISSION_MODES_INHERITED_MODE_ENV] = "ask";

@@ -22,6 +22,7 @@ import {
 	type OutsideWriteSnapshot,
 } from "./utils.ts"
 import { writePlanFile } from "./utils.ts"
+import { getPlanFilePath } from "./utils.ts"
 import {
 	listPendingRequests,
 	readForwardedResponse,
@@ -53,6 +54,11 @@ interface FakePi {
 	}>
 	appendEntries: Array<{ type: string; data: unknown }>
 	activeTools: string[]
+	allTools: Array<{
+		name: string
+		sourceInfo: { path: string; source: string; scope: string; origin: string }
+	}>
+	addTool: (name: string, source: string) => void
 	flags: Record<string, unknown>
 	setModelCalls: Array<{ model: unknown }>
 	thinkingLevel: string
@@ -107,6 +113,26 @@ function createFakePi(): FakePi {
 	}> = []
 	const appendEntries: Array<{ type: string; data: unknown }> = []
 	const activeTools = ["read", "edit", "write", "bash", "grep", "find"]
+	// Mirrors pi's getAllTools(): every registered tool plus its load-time
+	// sourceInfo, which Read Only mode uses for plugin allowlisting.
+	const allTools = [
+		"read",
+		"edit",
+		"write",
+		"bash",
+		"grep",
+		"find",
+		"ls",
+		"powershell",
+	].map((name) => ({
+		name,
+		sourceInfo: {
+			path: `<builtin:${name}>`,
+			source: "builtin",
+			scope: "temporary",
+			origin: "top-level",
+		},
+	}))
 	const flags: Record<string, unknown> = { "permission-mode": "ask" }
 	const setModelCalls: Array<{ model: unknown }> = []
 	let thinkingLevel = "off"
@@ -121,6 +147,21 @@ function createFakePi(): FakePi {
 		sentMessages,
 		appendEntries,
 		activeTools,
+		allTools,
+		addTool(name: string, source: string) {
+			allTools.push({
+				name,
+				sourceInfo: {
+					path: `/tmp/${name}.js`,
+					source,
+					scope: "user",
+					origin: "package",
+				},
+			})
+		},
+		getAllTools() {
+			return [...allTools]
+		},
 		flags,
 		setModelCalls,
 		getThinkingLevel: () => thinkingLevel,
@@ -454,6 +495,215 @@ describe("permission-modes extension: tool_call gate", () => {
 			await switchMode("plan")
 			const result = await callToolCall("bash", { command: "rm -rf /" })
 			expect(result).toMatchObject({ block: true })
+		})
+	})
+
+	describe("readonly mode", () => {
+		function writeConfig(data: Record<string, unknown>) {
+			writeFileSync(
+				join(configTmp, "permission-modes.json"),
+				JSON.stringify({ classifier: { enabled: false }, ...data }),
+			)
+		}
+
+		async function enterReadonly(data: Record<string, unknown> = {}) {
+			writeConfig(data)
+			pi.flags["permission-mode"] = "readonly"
+			await pi.simulateSessionStart(realProjectRoot)
+		}
+
+		it("removes edit/write from the active tool set", async () => {
+			await enterReadonly()
+			expect(pi.activeTools).not.toContain("edit")
+			expect(pi.activeTools).not.toContain("write")
+			expect(pi.activeTools).toEqual(
+				expect.arrayContaining(["read", "bash", "grep", "find"]),
+			)
+		})
+
+		it("restores edit/write by name when leaving read-only", async () => {
+			await enterReadonly()
+			await switchMode("ask")
+			expect(pi.activeTools).toEqual(expect.arrayContaining(["edit", "write"]))
+		})
+
+		it("does not clobber tools another extension activated meanwhile", async () => {
+			await enterReadonly()
+			pi.addTool("web_search", "npm:pi-web-access")
+			pi.activeTools.push("web_search")
+			await switchMode("ask")
+			expect(pi.activeTools).toEqual(
+				expect.arrayContaining(["edit", "write", "web_search"]),
+			)
+		})
+
+		it("keeps the plan snapshot intact across readonly → plan → ask", async () => {
+			await switchMode("plan")
+			await enterReadonly()
+			await switchMode("plan")
+			await switchMode("ask")
+			expect(pi.activeTools).toEqual(expect.arrayContaining(["edit", "write"]))
+			expect(pi.activeTools).not.toContain("plan_ready")
+		})
+
+		it("re-hides edit/write on every turn", async () => {
+			await enterReadonly()
+			pi.activeTools.push("edit", "write")
+			const handler = pi.handlers.get("before_agent_start")?.[0]
+			expect(handler).toBeDefined()
+			await handler!({ systemPrompt: "" }, makeCtx(pi, { cwd: realProjectRoot }))
+			expect(pi.activeTools).not.toContain("edit")
+			expect(pi.activeTools).not.toContain("write")
+		})
+
+		it("blocks edit and write with an actionable reason", async () => {
+			await enterReadonly()
+			const edit = await callToolCall("edit", { path: "src/foo.ts" })
+			expect(edit).toMatchObject({ block: true })
+			expect((edit as { reason: string }).reason).toContain("Read Only mode")
+			expect((edit as { reason: string }).reason).toContain("/ask")
+			expect(await callToolCall("write", { path: "src/foo.ts" })).toMatchObject({
+				block: true,
+			})
+		})
+
+		it("allows read tools, including outside cwd, without prompting", async () => {
+			await enterReadonly()
+			expect(await callToolCall("read", { path: "/etc/passwd" })).toBeUndefined()
+			expect(await callToolCall("grep", { path: "/etc" })).toBeUndefined()
+			expect(await callToolCall("find", { path: "/tmp" })).toBeUndefined()
+			expect(await callToolCall("ls", { path: "/tmp" })).toBeUndefined()
+		})
+
+		it("allows read-only bash and blocks mutating bash", async () => {
+			await enterReadonly()
+			expect(await callToolCall("bash", { command: "git status" })).toBeUndefined()
+			const rm = await callToolCall("bash", { command: "rm -rf /tmp/x" })
+			expect(rm).toMatchObject({ block: true })
+			expect((rm as { reason: string }).reason).toContain("read-only commands only")
+			expect(
+				await callToolCall("bash", { command: "echo hi > out.txt" }),
+			).toMatchObject({ block: true })
+		})
+
+		it("blocks powershell (no dedicated support this release)", async () => {
+			await enterReadonly()
+			const result = await callToolCall("powershell", { command: "Get-ChildItem" })
+			expect(result).toMatchObject({ block: true })
+		})
+
+		it("denies unknown extension tools by default and explains how to allow them", async () => {
+			pi.addTool("mcp__foo__bar", "npm:some-mcp")
+			await enterReadonly()
+			const result = await callToolCall("mcp__foo__bar", {})
+			expect(result).toMatchObject({ block: true })
+			expect((result as { reason: string }).reason).toContain("npm:some-mcp")
+			expect((result as { reason: string }).reason).toContain("readonly.allowPlugins")
+		})
+
+		it("allows tools from an allowlisted plugin", async () => {
+			const names = [
+				"web_enable",
+				"web_search",
+				"fetch_content",
+				"get_search_content",
+			]
+			for (const name of names) pi.addTool(name, "npm:pi-web-access")
+			await enterReadonly({ readonly: { allowPlugins: ["pi-web-access"] } })
+			for (const name of names) {
+				expect(await callToolCall(name, { query: "x" })).toBeUndefined()
+			}
+		})
+
+		it("accepts the full npm source as the allowlist entry", async () => {
+			pi.addTool("web_search", "npm:pi-web-access")
+			await enterReadonly({ readonly: { allowPlugins: ["npm:pi-web-access"] } })
+			expect(await callToolCall("web_search", {})).toBeUndefined()
+		})
+
+		it("does not let a short name exempt another plugin", async () => {
+			pi.addTool("web_search", "npm:pi-web-access")
+			await enterReadonly({ readonly: { allowPlugins: ["pi"] } })
+			expect(await callToolCall("web_search", {})).toMatchObject({ block: true })
+		})
+
+		it("still blocks edit/write when a plugin is allowlisted", async () => {
+			await enterReadonly({ readonly: { allowPlugins: ["pi-web-access"] } })
+			expect(await callToolCall("edit", { path: "a.ts" })).toMatchObject({
+				block: true,
+			})
+		})
+
+		it("ignores allow rules for writes and mutating bash", async () => {
+			await enterReadonly({
+				permissions: { allow: ["Edit", "Write", "Bash"] },
+			})
+			expect(await callToolCall("edit", { path: "src/foo.ts" })).toMatchObject({
+				block: true,
+			})
+			expect(await callToolCall("bash", { command: "rm -rf /tmp/x" })).toMatchObject({
+				block: true,
+			})
+		})
+
+		it("still honors deny rules", async () => {
+			await enterReadonly({ permissions: { deny: ["Read"] } })
+			const result = await callToolCall("read", { path: "src/foo.ts" })
+			expect(result).toMatchObject({ block: true })
+			expect((result as { reason: string }).reason).toContain(
+				"Denied by permission rule",
+			)
+		})
+
+		it("does not create a plan file", async () => {
+			const planPath = getPlanFilePath(realProjectRoot)
+			rmSync(planPath, { force: true })
+			await enterReadonly()
+			expect(existsSync(planPath)).toBe(false)
+		})
+
+		it("registers /readonly and switches mode", async () => {
+			const ctx = makeCtx(pi, { cwd: realProjectRoot })
+			await pi.simulateCommand("readonly", "", ctx)
+			const last = pi.appendEntries[pi.appendEntries.length - 1]
+			expect((last.data as { currentMode: string }).currentMode).toBe("readonly")
+		})
+
+		it("is listed by /mode", async () => {
+			let seen: readonly string[] = []
+			const ctx = makeCtx(pi, {
+				cwd: realProjectRoot,
+				ui: {
+					custom: selectorCustom((options) => {
+						seen = options
+						return undefined
+					}),
+				},
+			})
+			await pi.simulateCommand("mode", "", ctx)
+			expect(seen).toContain("Read Only")
+		})
+
+		it("restores readonly from session state", async () => {
+			const ctx = {
+				...makeCtx(pi, { cwd: realProjectRoot }),
+				sessionManager: {
+					getBranch: () => [],
+					getGitBranch: () => "",
+					getEntries: () => [
+						{
+							type: "custom",
+							customType: "modes",
+							data: { currentMode: "readonly" },
+						},
+					],
+				},
+			}
+			const handler = pi.handlers.get("session_start")?.[0]
+			expect(handler).toBeDefined()
+			await handler!({}, ctx)
+			expect(pi.activeTools).not.toContain("edit")
+			expect(pi.activeTools).not.toContain("write")
 		})
 	})
 

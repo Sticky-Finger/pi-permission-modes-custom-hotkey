@@ -1077,6 +1077,17 @@ describe("resolveModePrompt", () => {
 	it("auto has no routine injection", () => {
 		expect(resolveModePrompt({ mode: "auto" })).toBe("")
 	})
+
+	it("readonly has a short, static analysis-only block", () => {
+		const block = resolveModePrompt({ mode: "readonly" })
+		expect(block).toContain("[Read Only]")
+		expect(block).toContain("do not create or edit files")
+		expect(block.split("\n").length).toBeLessThanOrEqual(5)
+		// Stable across turns: no dynamic values leak in.
+		expect(resolveModePrompt({ mode: "readonly" })).toBe(block)
+		expect(block).not.toContain("plan.md")
+		expect(block).not.toContain("DONE:")
+	})
 })
 
 describe("plan helpers", () => {

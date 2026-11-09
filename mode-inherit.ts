@@ -13,6 +13,7 @@ export const PERMISSION_MODES_INHERITED_MODE_ENV =
 	"PERMISSION_MODES_INHERITED_MODE";
 
 export const INHERITABLE_MODES = [
+	"readonly",
 	"ask",
 	"plan",
 	"auto",

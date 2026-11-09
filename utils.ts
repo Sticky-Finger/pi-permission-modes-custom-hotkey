@@ -884,7 +884,7 @@ export const MODE_PROMPT_END = "<!-- /permission-modes:context -->"
 const MODE_PROMPT_BLOCK_RE =
 	/<!-- permission-modes:context -->[\s\S]*?<!-- \/permission-modes:context -->\n?/
 
-export type PermissionMode = "ask" | "plan" | "auto" | "bypass"
+export type PermissionMode = "readonly" | "ask" | "plan" | "auto" | "bypass"
 export type PlanPhase = "exploring" | "refining" | "executing"
 
 export function injectModePrompt(
@@ -939,6 +939,15 @@ export function resolveModePrompt(opts: ResolveModePromptOpts): string {
 			block = `[Plan/executing] Execute steps from plan.md. Mark progress with [DONE:n] tags.`;
 		}
 		return block;
+	}
+
+	if (mode === "readonly") {
+		// Deliberately short and static: Read Only mode exists to keep the
+		// model's attention on the question, not on planning or implementing.
+		return `[Read Only] Analysis and consulting mode: inspect and explain, never modify.
+- Answer in the conversation; do not create or edit files, and do not write a plan unless the user asks for one.
+- If something looks worth changing, describe the change in one or two sentences and stop.
+- Do not finish by offering to implement it.`
 	}
 
 	if (mode === "bypass" && needsBypassSecurityReminder) {

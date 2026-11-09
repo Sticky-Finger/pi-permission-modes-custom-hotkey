@@ -129,5 +129,5 @@ describe("dist artifact", () => {
 	it("loads and default-exports the extension factory", async () => {
 		const mod = await import(DIST_FILE)
 		expect(typeof mod.default).toBe("function")
-	})
+	}, 20_000) // dynamic import of the bundle + pi host packages; can exceed the 5s default under parallel load
 })

@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest"
 import {
 	DEFAULT_SHORTCUTS,
 	isUnsafeShortcutKey,
+	resolveReadonlyAllowPlugins,
 	resolveShortcuts,
 	type PermissionModesConfig,
 } from "./config.ts"
@@ -69,6 +70,39 @@ describe("resolveShortcuts", () => {
 		})
 		expect(resolved.cycleMode).toBe("ctrl+k")
 		expect(resolved).not.toHaveProperty("unknownField")
+	})
+})
+
+describe("resolveReadonlyAllowPlugins", () => {
+	it("defaults to an empty allowlist", () => {
+		expect(resolveReadonlyAllowPlugins({})).toEqual([])
+		expect(resolveReadonlyAllowPlugins({ readonly: {} })).toEqual([])
+	})
+
+	it("keeps configured plugin specs in order", () => {
+		expect(
+			resolveReadonlyAllowPlugins({
+				readonly: { allowPlugins: ["pi-web-access", "npm:other-plugin"] },
+			}),
+		).toEqual(["pi-web-access", "npm:other-plugin"])
+	})
+
+	it("drops blank and non-string entries", () => {
+		expect(
+			resolveReadonlyAllowPlugins({
+				readonly: {
+					allowPlugins: ["pi-web-access", "  ", 42 as unknown as string],
+				},
+			}),
+		).toEqual(["pi-web-access"])
+	})
+
+	it("tolerates a malformed allowPlugins value", () => {
+		expect(
+			resolveReadonlyAllowPlugins({
+				readonly: { allowPlugins: "pi-web-access" as unknown as string[] },
+			}),
+		).toEqual([])
 	})
 })
 
