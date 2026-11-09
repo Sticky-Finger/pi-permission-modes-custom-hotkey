@@ -3,9 +3,11 @@
  *
  * Claude-Code-style permission modes for the pi coding agent.
  *
- * Five modes (Shift+Tab by default — configurable via `shortcuts` in
- * ~/.pi/agent/permission-modes.json):
- *   readonly → ask → plan → auto → bypass → readonly
+ * Five modes (Shift+Tab cycles forward by default — configurable via
+ * `shortcuts` in ~/.pi/agent/permission-modes.json; the optional reverse
+ * shortcut `shortcuts.cycleModeReverse` is off unless configured, and
+ * `/mode-hotkeys` lists both keys with their registration status):
+ *   ask → readonly → plan → auto → bypass → ask
  *   - readonly Read-only analysis/consulting: no edits, no plan pipeline.
  *   - ask     Manual approval for edits, outside-cwd access, mutating bash.
  *   - plan    Read-only; only plan.md may be written.
@@ -33,6 +35,7 @@ import {
   buildYoloRejectionMessage,
 } from "./classifier-messages.ts";
 import {
+  getConfigPath,
   isUnsafeShortcutKey,
   loadPermissionModesConfig,
   resolveAutoModeConfig,
@@ -183,8 +186,10 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
   let classifierConfig = resolveClassifierConfig(loadPermissionModesConfig());
   let autoModeConfig = resolveAutoModeConfig(loadPermissionModesConfig());
   // Shortcuts are resolved once at load time; /reload re-runs the factory so config
-  // changes take effect on reload without extra plumbing.
-  const SHORTCUTS = resolveShortcuts(loadPermissionModesConfig());
+  // changes take effect on reload without extra plumbing. The raw config is kept
+  // so `/mode-hotkeys` can tell "unset" from "explicitly blank/disabled".
+  const CONFIG_AT_LOAD = loadPermissionModesConfig();
+  const SHORTCUTS = resolveShortcuts(CONFIG_AT_LOAD);
   let basePermissionRules: PermissionRule[] = [];
   let strippedDangerousRules: PermissionRule[] = [];
   let mergedPermissionRules: PermissionRule[] = [];
@@ -713,9 +718,20 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
     publishInheritedPermissionMode(mode);
   }
 
-  function cycleMode(ctx: ExtensionContext): void {
+  /**
+   * Advance the mode ring. `direction` is +1 (forward) or -1 (reverse).
+   *
+   * Both directions wrap symmetrically (`bypass → ask` forward,
+   * `ask → bypass` reverse): the ring has no direction-specific edge rule.
+   * Reaching `bypass` is equally possible via `/mode` or repeated forward
+   * presses, so a reverse-only clamp would not be a security boundary — the
+   * guardrails are the bypass security reminder and the always-visible footer.
+   */
+  function cycleMode(ctx: ExtensionContext, direction: 1 | -1 = 1): void {
     const idx = MODE_CYCLE.indexOf(currentMode);
-    void setMode(MODE_CYCLE[(idx + 1) % MODE_CYCLE.length], ctx);
+    const next =
+      MODE_CYCLE[(idx + direction + MODE_CYCLE.length) % MODE_CYCLE.length];
+    void setMode(next, ctx);
     if (ctx.hasUI) ctx.ui.notify(`Mode: ${MODE_META[currentMode].label}`);
   }
 
@@ -945,6 +961,22 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
         );
       } else {
         console.log(text);
+      }
+    },
+  });
+
+  pi.registerCommand("mode-hotkeys", {
+    description:
+      "Show this extension's shortcuts (mode cycle forward/reverse, thinking cycle) and whether they are registered",
+    handler: async (_args, ctx) => {
+      const content = buildModeHotkeysContent();
+      if (ctx.hasUI) {
+        pi.sendMessage(
+          { customType: "mode-hotkeys", content, display: true },
+          { triggerTurn: false },
+        );
+      } else {
+        console.log(content);
       }
     },
   });
@@ -1298,18 +1330,113 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
   // matcher accepts \r for ctrl+letter unconditionally) or bare editor keys —
   // are refused instead of registered, so a bad config can never shadow
   // message submit or editing. Warnings go to stderr and surface once in the
-  // session UI at startup.
-  type ShortcutField = "cycleMode" | "cycleThinking";
+  // session UI at startup. `cycleModeReverse` is opt-in: when it is unset
+  // (the default) nothing is registered and nothing is warned about.
+  type ShortcutField = "cycleMode" | "cycleModeReverse" | "cycleThinking";
   const registeredShortcuts: Partial<Record<ShortcutField, string>> = {};
+  /** Per-field outcome of registration, so /mode-hotkeys reports reality. */
+  const shortcutStates: Partial<
+    Record<
+      ShortcutField,
+      { configured: string | null; registered: string | null; note?: string }
+    >
+  > = {};
   const shortcutWarnings: string[] = [];
   let shortcutWarningsShown = false;
+
+  /** Raw (unresolved) value of a shortcut field: undefined = not configured. */
+  function configuredShortcutValue(
+    field: ShortcutField,
+  ): string | null | undefined {
+    const raw = (CONFIG_AT_LOAD.shortcuts ?? {}) as Record<string, unknown>;
+    const value = raw[field];
+    if (value === null) return null;
+    if (typeof value === "string") return value;
+    return undefined;
+  }
+
+  /** Mirror pi's /hotkeys key rendering (capitalized parts, alt→option on macOS). */
+  function formatShortcutKey(key: string): string {
+    return key
+      .split("/")
+      .map((combo) =>
+        combo
+          .split("+")
+          .map((part) => {
+            const display =
+              process.platform === "darwin" && part.toLowerCase() === "alt"
+                ? "option"
+                : part;
+            return display.charAt(0).toUpperCase() + display.slice(1);
+          })
+          .join("+"),
+      )
+      .join("/");
+  }
+
+  /** One /mode-hotkeys table row: display key + registration status. */
+  function shortcutRow(field: ShortcutField): {
+    key: string;
+    status: string;
+  } {
+    const state = shortcutStates[field];
+    if (state?.registered) {
+      return {
+        key: `\`${formatShortcutKey(state.registered)}\``,
+        status: "active",
+      };
+    }
+    const raw = configuredShortcutValue(field);
+    const configuredKey =
+      typeof raw === "string" && raw.trim()
+        ? `\`${formatShortcutKey(raw.trim().toLowerCase())}\``
+        : "—";
+    if (state?.note) return { key: configuredKey, status: state.note };
+    if (typeof raw === "string") return { key: configuredKey, status: "disabled" };
+    return { key: "—", status: "not configured (optional)" };
+  }
+
+  function buildModeHotkeysContent(): string {
+    const rows: Array<[string, ShortcutField]> = [
+      ["Cycle mode (forward) · `shortcuts.cycleMode`", "cycleMode"],
+      ["Cycle mode (reverse) · `shortcuts.cycleModeReverse`", "cycleModeReverse"],
+      ["Cycle thinking level · `shortcuts.cycleThinking`", "cycleThinking"],
+    ];
+    const lines = [
+      "**Permission-modes shortcuts**",
+      "",
+      "| Action | Key | Status |",
+      "|---|---|---|",
+      ...rows.map(([action, field]) => {
+        const row = shortcutRow(field);
+        return `| ${action} | ${row.key} | ${row.status} |`;
+      }),
+      "",
+      `Config: \`${getConfigPath()}\` · run \`/reload\` after edits`,
+    ];
+    const notes = (Object.entries(shortcutStates) as Array<
+      [ShortcutField, { configured: string | null; note?: string } | undefined]
+    >)
+      .filter(([, state]) => state?.note && state.configured)
+      .map(
+        ([field, state]) =>
+          `- \`${state!.configured}\` (shortcuts.${field}): ${state!.note}`,
+      );
+    if (notes.length) lines.push("", "**Notes**", ...notes);
+    return lines.join("\n");
+  }
+
   function registerConfiguredShortcut(
     field: ShortcutField,
     key: string | null,
     def: { description: string; handler: (ctx: ExtensionContext) => Promise<void> | void },
   ): void {
+    const state: { configured: string | null; registered: string | null; note?: string } =
+      { configured: key, registered: null };
+    shortcutStates[field] = state;
     if (!key) return;
     if (isUnsafeShortcutKey(key)) {
+      state.note = "refused (unsafe key)";
       const msg =
         `Shortcut "${key}" (shortcuts.${field}) was not registered: it collides with ` +
         `a terminal control character or editor key (e.g. ctrl+m sends Enter/CR, ` +
@@ -1319,13 +1446,31 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
       console.warn(`[permission-modes] ${msg}`);
       return;
     }
+    const clash = (
+      Object.entries(registeredShortcuts) as Array<[ShortcutField, string]>
+    ).find(([otherField, otherKey]) => otherField !== field && otherKey === key);
+    if (clash) {
+      state.note = `not registered (same as ${clash[0]})`;
+      const msg =
+        `Shortcut "${key}" (shortcuts.${field}) was not registered: it is already ` +
+        `used by shortcuts.${clash[0]}. Use a different key for each action.`;
+      shortcutWarnings.push(msg);
+      console.warn(`[permission-modes] ${msg}`);
+      return;
+    }
     registeredShortcuts[field] = key;
+    state.registered = key;
     pi.registerShortcut(key, def);
   }
 
   registerConfiguredShortcut("cycleMode", SHORTCUTS.cycleMode, {
-    description: "Cycle mode: Read Only → Ask → Plan → Auto → Bypass",
+    description: "Cycle mode forward (Ask → Read Only → Plan → Auto → Bypass)",
     handler: async (ctx) => cycleMode(ctx),
+  });
+
+  registerConfiguredShortcut("cycleModeReverse", SHORTCUTS.cycleModeReverse, {
+    description: "Cycle mode backward (Bypass → Auto → Plan → Read Only → Ask)",
+    handler: async (ctx) => cycleMode(ctx, -1),
   });
 
   // Alt+T: cycle the thinking level. pi has no built-in cycle helper, and setThinkingLevel

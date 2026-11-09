@@ -21,6 +21,7 @@ describe("resolveShortcuts", () => {
 	it("falls back to defaults when config is empty", () => {
 		expect(resolveShortcuts({})).toEqual({
 			cycleMode: "shift+tab",
+			cycleModeReverse: null,
 			cycleThinking: "alt+t",
 		})
 	})
@@ -35,7 +36,20 @@ describe("resolveShortcuts", () => {
 			shortcuts: { cycleMode: "ctrl+shift+m" },
 		})
 		expect(resolved.cycleMode).toBe("ctrl+shift+m")
+		expect(resolved.cycleModeReverse).toBeNull()
 		expect(resolved.cycleThinking).toBe("alt+t")
+	})
+
+	it("leaves the reverse cycle unconfigured (opt-in) by default", () => {
+		expect(DEFAULT_SHORTCUTS.cycleModeReverse).toBeNull()
+		expect(resolveShortcuts({}).cycleModeReverse).toBeNull()
+	})
+
+	it("resolves a configured reverse cycle key", () => {
+		const resolved = resolveShortcuts({
+			shortcuts: { cycleModeReverse: "Alt+Shift+X" },
+		})
+		expect(resolved.cycleModeReverse).toBe("alt+shift+x")
 	})
 
 	it("normalizes case and surrounding whitespace", () => {
@@ -48,17 +62,19 @@ describe("resolveShortcuts", () => {
 
 	it("null disables a shortcut", () => {
 		const resolved = resolveShortcuts({
-			shortcuts: { cycleThinking: null },
+			shortcuts: { cycleThinking: null, cycleModeReverse: null },
 		})
 		expect(resolved.cycleThinking).toBeNull()
+		expect(resolved.cycleModeReverse).toBeNull()
 		expect(resolved.cycleMode).toBe("shift+tab")
 	})
 
 	it("empty or whitespace-only string disables a shortcut", () => {
 		const resolved = resolveShortcuts({
-			shortcuts: { cycleMode: "   " },
+			shortcuts: { cycleMode: "   ", cycleModeReverse: " " },
 		})
 		expect(resolved.cycleMode).toBeNull()
+		expect(resolved.cycleModeReverse).toBeNull()
 	})
 
 	it("ignores unknown shortcut fields", () => {

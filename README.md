@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/@georgedong32/permission-modes)](https://www.npmjs.com/package/@georgedong32/permission-modes)
 [![License](https://img.shields.io/npm/l/@georgedong32/permission-modes)](LICENSE)
 
-Claude-Code-style **permission modes** for the [pi coding agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent). Five modes, cycled with **Shift+Tab**, that control how tool calls get approved. v2.0.0 adds **bypass**, a built-in **auto classifier**, **plan.md** file driver, and system-prompt anchor injection; the latest addition is **Read Only** for pure analysis/consulting.
+Claude-Code-style **permission modes** for the [pi coding agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent). Five modes, cycled with **Shift+Tab**, that control how tool calls get approved. v2.0.0 adds **bypass**, a built-in **auto classifier**, **plan.md** file driver, and system-prompt anchor injection; the latest addition is **Read Only** for pure analysis/consulting. An optional reverse-cycle shortcut can be configured (see [Reverse cycling](#reverse-cycling)).
 
 ## Modes
 
@@ -16,6 +16,8 @@ Claude-Code-style **permission modes** for the [pi coding agent](https://www.npm
 | **bypass** `⚡` | all auto-approved (tracked outside cwd) | auto | auto | security reminder on switch + compact |
 
 **Cycle (Shift+Tab):** ask → readonly → plan → auto → bypass → ask.
+
+An **optional reverse shortcut** (`shortcuts.cycleModeReverse`, off unless you configure it) walks the same ring backwards — one press goes from `readonly` back to `ask` instead of four presses forward. See [Reverse cycling](#reverse-cycling).
 
 The table and the cycle are ordered by **unattended autonomy**, not by permission strictness: `ask` stops for approval on every write, while `readonly` runs a whole turn without interruption (longer turns, more tokens, no human in the loop). In terms of *permission*, `readonly` is the smallest of the five — it is a hard ceiling that `allow` rules cannot widen — which is why it sits right after `ask` rather than at the end.
 
@@ -120,6 +122,7 @@ bash blocked by user. User feedback: use the local VERSION file instead
 | Shortcut | `Shift+Tab` | cycle modes (default — configurable, see below) |
 | Shortcut | `Alt+T` | cycle thinking level (off → minimal → low → medium → high → xhigh) |
 | Command | `/permissions` | list merged allow/deny/ask rules |
+| Command | `/mode-hotkeys` | list this extension's shortcuts (forward/reverse mode cycle, thinking cycle) and whether each one is actually registered |
 | Command | `/outside-writes` | list tracked outside-cwd writes (read-only) |
 | Command | `/undo-outside-writes` | restore outside-cwd writes (selector, `all`, or `--list`) |
 | Flag | `--permission-mode <name>` | start in a mode (accepts `readonly`, `ask`, `plan`, `auto`, `bypass`, or `default` as alias; default `ask`) |
@@ -128,22 +131,31 @@ bash blocked by user. User feedback: use the local VERSION file instead
 
 ### Custom shortcuts
 
-Both shortcuts are configurable via the `shortcuts` block in `~/.pi/agent/permission-modes.json`:
+All three shortcuts are configurable via the `shortcuts` block in `~/.pi/agent/permission-modes.json`:
 
 ```json
 {
   "shortcuts": {
-    "cycleMode": "ctrl+shift+m",
+    "cycleMode": "alt+x",
+    "cycleModeReverse": "alt+shift+x",
     "cycleThinking": "alt+t"
   }
 }
 ```
 
-- **Defaults** (when the block or a key is omitted): `cycleMode: "shift+tab"`, `cycleThinking: "alt+t"` — behavior is unchanged from previous versions.
-- Keys are normalized to lowercase before registering; set a key to `null` to disable that shortcut entirely.
+- **Defaults**: `cycleMode: "shift+tab"`, `cycleThinking: "alt+t"`, and `cycleModeReverse: null` — the reverse cycle is **opt-in**: no key is registered until you set one, and nothing is warned about while it is unset. Leave it out and the plugin behaves exactly like 3.1.0.
+- Keys are normalized to lowercase before registering; set a key to `null` (or an empty string) to disable that shortcut.
 - **Unsafe keys are refused** (not registered) with a warning on stderr and at session start: terminal control-char aliases `ctrl+m` (= Enter/CR), `ctrl+i` (= Tab), `ctrl+j`, `ctrl+h` (= Backspace), `ctrl+[` (= Escape), the bare editor keys `tab` / `backspace` / `space`, and bare or `shift+`-prefixed single printable characters (they would shadow typing). Use a safe combo such as `ctrl+shift+m` or `alt+m` instead.
-- The footer hint follows the registered `cycleMode` key (omitted when disabled or refused).
+- The footer hint follows the registered `cycleMode` key only (omitted when disabled or refused). The optional reverse key is deliberately **not** shown there — run `/mode-hotkeys` to see every key and its real status (`active`, `not configured (optional)`, `disabled`, `refused (unsafe key)`, `not registered (same as cycleMode)`).
+- A `cycleModeReverse` value that duplicates another registered key is **not** registered (with a warning) instead of silently overwriting it.
 - Run `/reload` after editing the file for changes to take effect.
+
+### Reverse cycling
+
+- **Backwards walk:** bypass → auto → plan → readonly → ask, so `ask → readonly` (one forward press) can be undone with one reverse press. Pressing forward again undoes an overshoot, in either direction.
+- **Symmetric wrap:** both directions wrap around the ring — forward `bypass → ask`, reverse `ask → bypass`. There is no direction-specific edge rule: bypass is equally reachable via `/mode` or repeated forward presses, so the guardrails are the bypass security reminder and the always-visible footer, not a reverse-only clamp.
+- Reverse uses the same switch path as forward: identical persistence, tool-set changes, plan-file handling, subagent mode inheritance and reminders — and it **never** touches the model or thinking level.
+- **Terminal caveat:** pi only receives `ctrl+shift+<letter>`, `alt+shift+<letter>`, `ctrl+tab` and `ctrl+shift+tab`-style combos from terminals that support the Kitty keyboard protocol or xterm `modifyOtherKeys`. Single-modifier `alt+<letter>` / `ctrl+<letter>` have a legacy encoding and work everywhere. `/mode-hotkeys` proves the extension registered the key — it cannot prove your terminal delivers it. If a key does nothing, try a legacy-safe combo such as `alt+r`.
 
 > **Note — `shift+tab` conflict with pi's built-in binding.** pi binds `app.thinking.cycle` (cycle thinking level) to `shift+tab` by default and reserves it against extensions, so the default `cycleMode` key is silently dropped on stock pi. Either remap `cycleMode` to a free key as above, or free the key by adding `{"app.thinking.cycle": []}` to `~/.pi/agent/keybindings.json` (thinking-level cycling remains available on this extension's `alt+t`).
 

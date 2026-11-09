@@ -34,20 +34,27 @@ export interface ClassifierConfig {
 }
 
 export interface ShortcutConfig {
-	/** Cycle permission mode (ask → plan → auto → bypass). Default "shift+tab". `null` disables. */
+	/** Cycle permission mode forward (ask → readonly → plan → auto → bypass). Default "shift+tab". `null` disables. */
 	cycleMode: string | null
+	/**
+	 * Cycle permission mode backward (bypass → auto → plan → readonly → ask).
+	 * Default `null` = opt-in: unset and `null` both mean "not registered",
+	 * and no warning is produced for an unconfigured reverse shortcut.
+	 */
+	cycleModeReverse: string | null
 	/** Cycle thinking level. Default "alt+t". `null` disables. */
 	cycleThinking: string | null
 }
 
-export const DEFAULT_SHORTCUTS: Readonly<Record<keyof ShortcutConfig, string>> = {
+export const DEFAULT_SHORTCUTS: Readonly<Record<keyof ShortcutConfig, string | null>> = {
 	cycleMode: "shift+tab",
+	cycleModeReverse: null,
 	cycleThinking: "alt+t",
 } as const
 
 function normalizeShortcutKey(
 	key: string | null | undefined,
-	fallback: string,
+	fallback: string | null,
 ): string | null {
 	if (key === null) return null
 	if (typeof key !== "string") return fallback
@@ -59,6 +66,10 @@ export function resolveShortcuts(config: PermissionModesConfig): ShortcutConfig 
 	const s = config.shortcuts ?? {}
 	return {
 		cycleMode: normalizeShortcutKey(s.cycleMode, DEFAULT_SHORTCUTS.cycleMode),
+		cycleModeReverse: normalizeShortcutKey(
+			s.cycleModeReverse,
+			DEFAULT_SHORTCUTS.cycleModeReverse,
+		),
 		cycleThinking: normalizeShortcutKey(s.cycleThinking, DEFAULT_SHORTCUTS.cycleThinking),
 	}
 }
@@ -115,7 +126,7 @@ export interface PermissionModesConfig {
 		deny?: string[]
 		ask?: string[]
 	}
-	/** Keyboard shortcuts. Defaults: shift+tab / alt+t; `null` disables. */
+	/** Keyboard shortcuts. Defaults: shift+tab / alt+t; reverse cycle is opt-in (`cycleModeReverse`, default null). `null` disables. */
 	shortcuts?: Partial<ShortcutConfig>
 }
 

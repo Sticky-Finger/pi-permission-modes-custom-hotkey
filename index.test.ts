@@ -1935,10 +1935,18 @@ describe("permission-modes extension: configurable shortcuts", () => {
 	}
 
 	it("registers the default shortcuts when no shortcuts config exists", () => {
-		writeConfig({ classifier: { enabled: false } })
-		permissionModesExtension(makeFakePiForExtension(pi))
-		expect(pi.shortcuts.has("shift+tab")).toBe(true)
-		expect(pi.shortcuts.has("alt+t")).toBe(true)
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+		try {
+			writeConfig({ classifier: { enabled: false } })
+			permissionModesExtension(makeFakePiForExtension(pi))
+			expect(pi.shortcuts.has("shift+tab")).toBe(true)
+			expect(pi.shortcuts.has("alt+t")).toBe(true)
+			// The reverse cycle is opt-in: unset means no key and no warning.
+			expect(pi.shortcuts.has("ctrl+shift+tab")).toBe(false)
+			expect(warn).not.toHaveBeenCalled()
+		} finally {
+			warn.mockRestore()
+		}
 	})
 
 	it("registers a custom cycleMode key instead of the default", () => {
@@ -1985,6 +1993,164 @@ describe("permission-modes extension: configurable shortcuts", () => {
 			// The remaining safe shortcuts are unaffected.
 			expect(pi.shortcuts.has("alt+t")).toBe(true)
 			expect(warn.mock.calls.some((c) => String(c[0]).includes("ctrl+m"))).toBe(true)
+		} finally {
+			warn.mockRestore()
+		}
+	})
+})
+
+// The reverse cycle shortcut is opt-in (`shortcuts.cycleModeReverse`, default
+// null): nothing is registered and nothing is warned about until the user
+// configures a key. Reverse stops at ask instead of wrapping into bypass, and
+// `/mode-hotkeys` reports the real registration outcome (never just the config).
+describe("permission-modes extension: reverse mode cycle", () => {
+	let pi: FakePi
+	let configTmp: string
+
+	beforeEach(() => {
+		pi = createFakePi()
+		configTmp = mkdtempSync(join(tmpdir(), "pm-idx-rev-"))
+		setConfigPath(join(configTmp, "permission-modes.json"))
+	})
+
+	function load(cfg: unknown) {
+		writeFileSync(join(configTmp, "permission-modes.json"), JSON.stringify(cfg))
+		permissionModesExtension(makeFakePiForExtension(pi))
+	}
+
+	const REVERSE_CONFIG = {
+		classifier: { enabled: false },
+		shortcuts: { cycleModeReverse: "alt+shift+x" },
+	}
+
+	function lastMode(): string {
+		const last = pi.appendEntries[pi.appendEntries.length - 1]
+		return (last.data as { currentMode: string }).currentMode
+	}
+
+	function ctx(notifications: string[] = []) {
+		return makeCtx(pi, {
+			cwd: process.cwd(),
+			ui: {
+				notify: (msg: string) => notifications.push(msg),
+				custom: async () => "Block",
+			},
+		})
+	}
+
+	function hotkeysMessage(): string {
+		return String(pi.sentMessages[pi.sentMessages.length - 1]?.message.content)
+	}
+
+	it("registers no reverse key by default and stays silent", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+		try {
+			load({ classifier: { enabled: false } })
+			expect(pi.shortcuts.has("ctrl+shift+tab")).toBe(false)
+			expect(warn).not.toHaveBeenCalled()
+		} finally {
+			warn.mockRestore()
+		}
+	})
+
+	it("registers a configured reverse key alongside the forward key", () => {
+		load(REVERSE_CONFIG)
+		expect(pi.shortcuts.has("alt+shift+x")).toBe(true)
+		expect(pi.shortcuts.has("shift+tab")).toBe(true)
+	})
+
+	it("returns to ask after one forward step (readonly → ask)", async () => {
+		load(REVERSE_CONFIG)
+		await pi.simulateSessionStart(process.cwd())
+		await pi.simulateShortcut("shift+tab", ctx())
+		expect(lastMode()).toBe("readonly")
+		await pi.simulateShortcut("alt+shift+x", ctx())
+		expect(lastMode()).toBe("ask")
+	})
+
+	it("walks the ring backwards: bypass → auto → plan → readonly → ask", async () => {
+		load(REVERSE_CONFIG)
+		await pi.simulateSessionStart(process.cwd())
+		await pi.simulateCommand(
+			"bypass",
+			"",
+			makeCtx(pi, { cwd: process.cwd(), ui: {} }),
+		)
+		const seen: string[] = []
+		for (let i = 0; i < 4; i++) {
+			await pi.simulateShortcut("alt+shift+x", ctx())
+			seen.push(lastMode())
+		}
+		expect(seen).toEqual(["auto", "plan", "readonly", "ask"])
+	})
+
+	it("wraps backwards from ask to bypass (symmetric with bypass → ask)", async () => {
+		load(REVERSE_CONFIG)
+		await pi.simulateSessionStart(process.cwd())
+		const notes: string[] = []
+		await pi.simulateShortcut("alt+shift+x", ctx(notes))
+		expect(lastMode()).toBe("bypass")
+		expect(notes.some((m) => m.includes("already first"))).toBe(false)
+		expect(notes.some((m) => m.includes("Mode: Bypass"))).toBe(true)
+	})
+
+	it("never touches the model or thinking level", async () => {
+		load(REVERSE_CONFIG)
+		await pi.simulateSessionStart(process.cwd())
+		await pi.simulateShortcut("shift+tab", ctx())
+		await pi.simulateShortcut("alt+shift+x", ctx())
+		expect(pi.setModelCalls).toEqual([])
+		expect(pi.getThinkingLevel()).toBe("off")
+	})
+
+	it("/mode-hotkeys reports the reverse key as not configured by default", async () => {
+		load({ classifier: { enabled: false } })
+		await pi.simulateCommand("mode-hotkeys", "", ctx())
+		const content = hotkeysMessage()
+		expect(content).toContain("Cycle mode (forward)")
+		expect(content).toContain("`Shift+Tab`")
+		expect(content).toContain("Cycle mode (reverse)")
+		expect(content).toContain("not configured (optional)")
+		expect(pi.sentMessages[pi.sentMessages.length - 1]?.opts).toEqual({
+			triggerTurn: false,
+		})
+	})
+
+	it("/mode-hotkeys shows a configured reverse key as active", async () => {
+		load(REVERSE_CONFIG)
+		await pi.simulateCommand("mode-hotkeys", "", ctx())
+		const content = hotkeysMessage()
+		expect(content).toContain("`Alt+Shift+X`")
+		expect(content).toContain("| active |")
+	})
+
+	it("/mode-hotkeys reports an unsafe reverse key as refused", async () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+		try {
+			load({
+				classifier: { enabled: false },
+				shortcuts: { cycleModeReverse: "ctrl+m" },
+			})
+			expect(pi.shortcuts.has("ctrl+m")).toBe(false)
+			await pi.simulateCommand("mode-hotkeys", "", ctx())
+			const content = hotkeysMessage()
+			expect(content).toContain("refused (unsafe key)")
+			expect(content).toContain("ctrl+m")
+		} finally {
+			warn.mockRestore()
+		}
+	})
+
+	it("/mode-hotkeys flags a reverse key equal to the forward key", async () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+		try {
+			load({
+				classifier: { enabled: false },
+				shortcuts: { cycleMode: "alt+x", cycleModeReverse: "alt+x" },
+			})
+			expect(pi.shortcuts.has("alt+x")).toBe(true)
+			await pi.simulateCommand("mode-hotkeys", "", ctx())
+			expect(hotkeysMessage()).toContain("not registered (same as cycleMode)")
 		} finally {
 			warn.mockRestore()
 		}

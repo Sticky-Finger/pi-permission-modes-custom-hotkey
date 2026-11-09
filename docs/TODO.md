@@ -52,3 +52,8 @@
   - 实现计划：[docs/plan/20261109-0855-mode-cycle-order.md](plan/20261109-0855-mode-cycle-order.md)
   - 分支：`refactor/mode-cycle-order`（自 `fix/wrap-around-selector` 最新提交 `b891232` 切出）
   - 状态：✅ 编码完成，402 个测试全部通过（新增 `mode cycle order` 段 6 例 + 修正既有首跳用例 1 例）；产物已重建 89,351 B / 30,989 B gzip，三道构建门禁全过；待实机验收与提交
+
+- [x] [Feature] 权限模式支持逆序循环（可选反向快捷键 `shortcuts.cycleModeReverse`，默认关闭不告警；双向对称环绕；只加快捷键、不新增切换命令；新增只读 `/mode-hotkeys` 查看快捷键及注册状态）
+  - 实现计划：[docs/plan/20261109-1301-reverse-mode-cycle.md](plan/20261109-1301-reverse-mode-cycle.md)
+  - 分支：`feat/reverse-mode-cycle`（自 `fix/wrap-around-selector` 最新提交 `b055648` 切出）
+  - 状态：✅ 完成（414 个测试全绿，新增 12 例；产物 91,576 B / 31,731 B gzip，三道构建门禁全过）；已由用户实机手动验收通过（2026-11-09）；待用户手动提交
