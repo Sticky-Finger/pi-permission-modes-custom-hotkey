@@ -45,6 +45,7 @@ type CommandHandler = (
 interface FakePi {
 	handlers: Map<string, Handler[]>
 	commands: Map<string, CommandHandler>
+	commandDescriptions: Map<string, string>
 	shortcuts: Map<string, Handler>
 	tools: Map<string, { name: string; execute: (...args: unknown[]) => Promise<unknown> }>
 	userMessages: Array<{ text: string; opts?: unknown }>
@@ -104,6 +105,7 @@ interface FakeCtxOptions {
 function createFakePi(): FakePi {
 	const handlers = new Map<string, Handler[]>()
 	const commands = new Map<string, CommandHandler>()
+	const commandDescriptions = new Map<string, string>()
 	const shortcuts = new Map<string, Handler>()
 	const tools = new Map<string, { name: string; execute: (...args: unknown[]) => Promise<unknown> }>()
 	const userMessages: Array<{ text: string; opts?: unknown }> = []
@@ -141,6 +143,7 @@ function createFakePi(): FakePi {
 	const pi = {
 		handlers,
 		commands,
+		commandDescriptions,
 		shortcuts,
 		tools,
 		userMessages,
@@ -181,8 +184,9 @@ function createFakePi(): FakePi {
 			list.push(handler)
 			handlers.set(event, list)
 		},
-		registerCommand(name: string, def: { handler: CommandHandler }) {
+		registerCommand(name: string, def: { handler: CommandHandler; description?: string }) {
 			commands.set(name, def.handler)
+			commandDescriptions.set(name, def.description ?? "")
 		},
 		registerShortcut(key: string, def: { handler: Handler }) {
 			shortcuts.set(key, def.handler)
@@ -1944,7 +1948,7 @@ describe("permission-modes extension: configurable shortcuts", () => {
 		expect(pi.shortcuts.has("shift+tab")).toBe(false)
 	})
 
-	it("custom cycleMode shortcut cycles modes (ask → plan)", async () => {
+	it("custom cycleMode shortcut cycles modes (ask → readonly)", async () => {
 		writeConfig({ shortcuts: { cycleMode: "ctrl+shift+m" } })
 		permissionModesExtension(makeFakePiForExtension(pi))
 		await pi.simulateSessionStart(process.cwd())
@@ -1959,7 +1963,7 @@ describe("permission-modes extension: configurable shortcuts", () => {
 				},
 			}),
 		)
-		expect(notifications.some((m) => m.includes("Mode: Plan"))).toBe(true)
+		expect(notifications.some((m) => m.includes("Mode: Read Only"))).toBe(true)
 	})
 
 	it("normalizes configured keys to lowercase before registering", () => {
@@ -1984,5 +1988,98 @@ describe("permission-modes extension: configurable shortcuts", () => {
 		} finally {
 			warn.mockRestore()
 		}
+	})
+})
+
+// Cycle order follows unattended autonomy, not permission strictness: `ask`
+// stops for approval on every write, `readonly` runs a whole turn without
+// interruption, so readonly sits right after ask. See
+// docs/plan/20261109-0855-mode-cycle-order.md.
+describe("permission-modes extension: mode cycle order", () => {
+	let pi: FakePi
+	let configTmp: string
+
+	beforeEach(async () => {
+		pi = createFakePi()
+		configTmp = mkdtempSync(join(tmpdir(), "pm-idx-cycle-"))
+		setConfigPath(join(configTmp, "permission-modes.json"))
+		writeFileSync(
+			join(configTmp, "permission-modes.json"),
+			JSON.stringify({ classifier: { enabled: false } }),
+		)
+		permissionModesExtension(makeFakePiForExtension(pi))
+		await pi.simulateSessionStart(process.cwd())
+	})
+
+	/** Mode persisted by the most recent `setMode()`. */
+	function lastMode(): string {
+		const last = pi.appendEntries[pi.appendEntries.length - 1]
+		return (last.data as { currentMode: string }).currentMode
+	}
+
+	function cycleCtx() {
+		return makeCtx(pi, {
+			cwd: process.cwd(),
+			ui: { notify: () => {}, custom: async () => "Block" },
+		})
+	}
+
+	it("starts in ask (edit/write stay in the tool set), the head of the cycle", () => {
+		// Read Only is the only mode that removes edit/write from the tool set at
+		// session start, so their presence proves the default mode is ask.
+		expect(pi.activeTools).toContain("edit")
+		expect(pi.activeTools).toContain("write")
+	})
+
+	it("cycles ask → readonly → plan → auto → bypass → ask", async () => {
+		const seen: string[] = []
+		for (let i = 0; i < 5; i++) {
+			await pi.simulateShortcut("shift+tab", cycleCtx())
+			seen.push(lastMode())
+		}
+		expect(seen).toEqual(["readonly", "plan", "auto", "bypass", "ask"])
+	})
+
+	it("cycles bypass → ask (was bypass → readonly)", async () => {
+		await pi.simulateCommand("bypass", "", makeCtx(pi, { cwd: process.cwd(), ui: {} }))
+		expect(lastMode()).toBe("bypass")
+		await pi.simulateShortcut("shift+tab", cycleCtx())
+		expect(lastMode()).toBe("ask")
+	})
+
+	it("lists modes in cycle order in the /mode selector", async () => {
+		let seen: readonly string[] = []
+		await pi.simulateCommand(
+			"mode",
+			"",
+			makeCtx(pi, {
+				cwd: process.cwd(),
+				ui: {
+					custom: selectorCustom((options) => {
+						seen = options
+						return undefined
+					}),
+				},
+			}),
+		)
+		expect(seen).toEqual(["Ask", "Read Only", "Plan", "Auto", "Bypass"])
+	})
+
+	it("still maps each selector row to its mode after reordering", async () => {
+		await pi.simulateCommand(
+			"mode",
+			"",
+			makeCtx(pi, {
+				cwd: process.cwd(),
+				ui: { custom: selectorCustom(() => "Read Only") },
+			}),
+		)
+		expect(lastMode()).toBe("readonly")
+	})
+
+	it("documents modes in cycle order in the /mode description", () => {
+		expect(pi.commandDescriptions.get("mode")).toContain(
+			"(ask | readonly | plan | auto | bypass)",
+		)
 	})
 })

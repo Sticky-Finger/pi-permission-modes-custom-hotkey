@@ -138,7 +138,10 @@ import {
 
 type Mode = PermissionMode;
 
-const MODE_CYCLE: Mode[] = ["readonly", "ask", "plan", "auto", "bypass"];
+// Cycle order follows unattended autonomy, not permission strictness: `ask` stops
+// for approval on every write, `readonly` runs a whole turn without interruption,
+// so readonly sits after ask. See docs/plan/20261109-0855-mode-cycle-order.md.
+const MODE_CYCLE: Mode[] = ["ask", "readonly", "plan", "auto", "bypass"];
 
 const MODE_META: Record<Mode, { icon: string; label: string; role: string }> = {
   readonly: { icon: "◐", label: "Read Only", role: "success" },
@@ -948,7 +951,7 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
 
   pi.registerCommand("mode", {
     description:
-      "Show or set the permission mode (readonly | ask | plan | auto | bypass)",
+      "Show or set the permission mode (ask | readonly | plan | auto | bypass)",
     handler: async (args, ctx) => {
       const arg = (args ?? "").trim();
       if (arg && (MODE_CYCLE as string[]).includes(arg)) {

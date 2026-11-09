@@ -9,13 +9,15 @@ Claude-Code-style **permission modes** for the [pi coding agent](https://www.npm
 
 | Mode | edit / write | reads outside cwd | bash | notes |
 |---|---|---|---|---|
-| **readonly** `◐` | removed from the tool set + blocked | allowed | read-only allowlist | no plan file, no plan dialog; plugin tools denied unless allowlisted |
 | **ask** `●` | prompt (`Allow` / `Allow all → bypass` / `Block`) | prompt | mutating commands prompt | one-line reminder on mode switch |
+| **readonly** `◐` | removed from the tool set + blocked | allowed | read-only allowlist | no plan file, no plan dialog; plugin tools denied unless allowlisted |
 | **plan** `⏸` | only `plan.md` | allowed | read-only allowlist | plan file at `.pi/projects/<id>/plan.md` |
 | **auto** `▶` | cwd writes auto; risky ops → classifier/blacklist | auto | tiered | optional classifier in `permission-modes.json` |
 | **bypass** `⚡` | all auto-approved (tracked outside cwd) | auto | auto | security reminder on switch + compact |
 
-**Cycle (Shift+Tab):** readonly → ask → plan → auto → bypass → readonly.
+**Cycle (Shift+Tab):** ask → readonly → plan → auto → bypass → ask.
+
+The table and the cycle are ordered by **unattended autonomy**, not by permission strictness: `ask` stops for approval on every write, while `readonly` runs a whole turn without interruption (longer turns, more tokens, no human in the loop). In terms of *permission*, `readonly` is the smallest of the five — it is a hard ceiling that `allow` rules cannot widen — which is why it sits right after `ask` rather than at the end.
 
 When there is no interactive UI (`pi -p`, `--mode json`), anything that would prompt is **blocked** instead of silently allowed — unless the process is a **pi-subagents child** with `PI_SUBAGENT_PARENT_SESSION` set; then the ask is forwarded to the parent session UI (see below).
 

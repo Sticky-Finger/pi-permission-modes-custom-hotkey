@@ -13,7 +13,7 @@
 ```
 
 - **Slash command:** `/readonly`
-- **Cycle position:** `readonly → ask → plan → auto → bypass → readonly`
+- **Cycle position:** `ask → readonly → plan → auto → bypass → ask` (ordered by unattended autonomy, not permission strictness — see [docs/plan/20261109-0855-mode-cycle-order.md](../plan/20261109-0855-mode-cycle-order.md))
 - **Flag:** `--permission-mode readonly`
 - **Subagent inheritance:** yes (`PERMISSION_MODES_INHERITED_MODE=readonly`)
 
