@@ -16,6 +16,10 @@
   - 详情：[docs/issues/20261107-powershell-not-gated.md](issues/20261107-powershell-not-gated.md)
   - 状态：⏸ 已知，暂不修（2026-11-07）
 
+- [ ] [Fix] 快捷键冲突检测区分修饰键顺序（`ctrl+alt+x` 与 `alt+ctrl+x` 是同一物理键，却会被双双注册）
+  - 详情：[docs/issues/20261109-shortcut-modifier-order-clash.md](issues/20261109-shortcut-modifier-order-clash.md)
+  - 状态：⏸ 已知，暂不修（2026-11-09）
+
 ## 已完成
 
 - [x] [Refactor] 移除 `alt+t` 思考强度循环快捷键（思考强度交还 pi 原生；`shortcuts.cycleThinking` 不再生效但旧配置静默兼容）
