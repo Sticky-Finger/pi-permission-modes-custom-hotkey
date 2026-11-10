@@ -967,7 +967,7 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
 
   pi.registerCommand("mode-hotkeys", {
     description:
-      "Show this extension's shortcuts (mode cycle forward/reverse, thinking cycle) and whether they are registered",
+      "Show this extension's shortcuts (mode cycle forward/reverse) and whether they are registered",
     handler: async (_args, ctx) => {
       const content = buildModeHotkeysContent();
       if (ctx.hasUI) {
@@ -1332,7 +1332,11 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
   // message submit or editing. Warnings go to stderr and surface once in the
   // session UI at startup. `cycleModeReverse` is opt-in: when it is unset
   // (the default) nothing is registered and nothing is warned about.
-  type ShortcutField = "cycleMode" | "cycleModeReverse" | "cycleThinking";
+  //
+  // Only mode cycling is bound here. Thinking-level cycling belongs to pi's
+  // native `app.thinking.cycle` (`shift+tab`) / `/thinking`; this extension
+  // used to duplicate it on `alt+t` and no longer registers anything for it.
+  type ShortcutField = "cycleMode" | "cycleModeReverse";
   const registeredShortcuts: Partial<Record<ShortcutField, string>> = {};
   /** Per-field outcome of registration, so /mode-hotkeys reports reality. */
   const shortcutStates: Partial<
@@ -1400,7 +1404,6 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
     const rows: Array<[string, ShortcutField]> = [
       ["Cycle mode (forward) · `shortcuts.cycleMode`", "cycleMode"],
       ["Cycle mode (reverse) · `shortcuts.cycleModeReverse`", "cycleModeReverse"],
-      ["Cycle thinking level · `shortcuts.cycleThinking`", "cycleThinking"],
     ];
     const lines = [
       "**Permission-modes shortcuts**",
@@ -1473,50 +1476,12 @@ export default function permissionModesExtension(pi: ExtensionAPI): void {
     handler: async (ctx) => cycleMode(ctx, -1),
   });
 
-  // Alt+T: cycle the thinking level. pi has no built-in cycle helper, and setThinkingLevel
-  // clamps to the model's capabilities, so we advance to the next level the model actually
-  // accepts (skipping ones it clamps away). The footer reflects the new level live.
-  const THINKING_LEVELS = [
-    "off",
-    "minimal",
-    "low",
-    "medium",
-    "high",
-    "xhigh",
-  ] as const;
-  function cycleThinkingLevel(ctx: ExtensionContext): void {
-    const get = (): string =>
-      typeof (pi as any).getThinkingLevel === "function"
-        ? (pi as any).getThinkingLevel()
-        : "off";
-    const setLevel = (pi as any).setThinkingLevel as
-      | ((l: string) => void)
-      | undefined;
-    if (typeof setLevel !== "function") return;
-    const cur = get();
-    let i = THINKING_LEVELS.indexOf(cur as (typeof THINKING_LEVELS)[number]);
-    if (i < 0) i = 0;
-    for (let step = 1; step <= THINKING_LEVELS.length; step++) {
-      const next = THINKING_LEVELS[(i + step) % THINKING_LEVELS.length];
-      setLevel(next);
-      const applied = get();
-      if (applied !== cur) {
-        if (ctx.hasUI) ctx.ui.notify(`Thinking: ${applied}`, "info");
-        return;
-      }
-    }
-    if (ctx.hasUI)
-      ctx.ui.notify(
-        `Thinking: ${get()} (model supports no other levels)`,
-        "info",
-      );
-  }
-
-  registerConfiguredShortcut("cycleThinking", SHORTCUTS.cycleThinking, {
-    description:
-      "Cycle thinking level (off → minimal → low → medium → high → xhigh)",
-    handler: async (ctx) => cycleThinkingLevel(ctx),
-  });
+  // Thinking level is deliberately not bound here: pi already cycles it on
+  // `app.thinking.cycle` (`shift+tab`) and exposes `/thinking` + the
+  // `cycle_thinking_level` RPC. This extension's old `alt+t` duplicated that
+  // with no permission-mode coupling (the mode↔effort link was removed in
+  // v3.0.0), so it was dropped — a leftover `shortcuts.cycleThinking` in the
+  // config file is ignored.
 
   // NB: pi has a built-in `--mode` (output mode: text/json/rpc), so the start-mode
   // flag must use a distinct name to avoid being shadowed at parse time.

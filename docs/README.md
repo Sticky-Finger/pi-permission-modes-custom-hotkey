@@ -28,7 +28,7 @@ permission-modes 插件的文档目录：产品需求、模式提示词、任务
 - **背景**：`shift+tab` 与 pi 内置 `app.thinking.cycle` 的冲突根因，
 以及为什么 `keybindings.json` 改不了扩展快捷键、正确用法是什么；
 - **功能用法**：`~/.pi/agent/permission-modes.json` 的 `shortcuts` 配置段——
-三个字段（`cycleMode` / `cycleThinking` / `cycleProfile`）、默认值、
+当前仅 `cycleMode` / `cycleModeReverse` 两个字段（历史版本另有已被移除的 `cycleThinking` / `cycleProfile`）、默认值、
 `null` 禁用、`/reload` 生效；
 - **临时加载方式**：不卸载 npm 发布版，用 `pi -ne -e <仓库>/index.ts`
 会话级切换到本地代码库版本（含 alias 写法与副作用说明）；

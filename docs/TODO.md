@@ -16,11 +16,12 @@
   - 详情：[docs/issues/20261107-powershell-not-gated.md](issues/20261107-powershell-not-gated.md)
   - 状态：⏸ 已知，暂不修（2026-11-07）
 
-- [ ] [Refactor] `alt+t` 思考强度循环快捷键与 pi 原生 `app.thinking.cycle` 重复（模式不再绑定思考强度后成为纯冗余绑定）
-  - 详情：[docs/issues/20261109-thinking-cycle-shortcut-redundant.md](issues/20261109-thinking-cycle-shortcut-redundant.md)
-  - 状态：⏸ 已知，暂不修（2026-11-09）
-
 ## 已完成
+
+- [x] [Refactor] 移除 `alt+t` 思考强度循环快捷键（思考强度交还 pi 原生；`shortcuts.cycleThinking` 不再生效但旧配置静默兼容）
+  - 实现计划：[docs/plan/20261109-1559-remove-thinking-cycle-shortcut.md](plan/20261109-1559-remove-thinking-cycle-shortcut.md)
+  - 分支：`refactor/remove-thinking-cycle-shortcut`（自 `fix/wrap-around-selector` 最新提交 `9f02f60` 切出）
+  - 状态：✅ 完成（2026-11-09）——418 个测试全绿（新增 4 例）；产物 90,798 B / 31,474 B gzip，三道构建门禁全过；已由用户实机 `pi -ne -e ./dist/index.js` 手动验收通过
 
 - [x] [Feature] 支持自定义快捷键（`shortcuts` 配置段；默认保持 `shift+tab` / `alt+t` / `alt+i` 不变）
   - 实现计划：[docs/plan/20260829-2239-configurable-shortcuts.md](plan/20260829-2239-configurable-shortcuts.md)

@@ -5,6 +5,10 @@
 > 实现计划：[docs/plan/20260829-2239-configurable-shortcuts.md](plan/20260829-2239-configurable-shortcuts.md)
 > 环境：Windows 10，pi 0.84.4，已全局安装 npm 发布版 `@georgedong32/permission-modes@2.6.3`
 
+> **2026-11-09 更新（3.2.0）**：`shortcuts.cycleThinking`（`alt+t`）已移除——思考强度交还 pi 原生 `app.thinking.cycle`（`shift+tab`）/ `/thinking`。
+> 本文档保留当时（2.x）的验证过程作为历史记录，下方与 `cycleThinking` / `alt+t` / `cycleProfile` 相关的描述均已标注失效。
+> 移除计划：[docs/plan/20261109-1559-remove-thinking-cycle-shortcut.md](plan/20261109-1559-remove-thinking-cycle-shortcut.md)
+
 ---
 
 ## 1. 背景：为什么要做这个功能
@@ -21,7 +25,8 @@
   注册的是原始按键字符串，不产生可被引用的具名 action。
 - keybindings.json 唯一的正确用法是**释放按键**：写 `{"app.thinking.cycle": []}`
   禁用内置 thinking 循环后，`shift+tab` 不再保留，插件的注册即可成功
-  （本机已完成此步骤；thinking 循环仍有插件的 `alt+t` 可用）。
+  （当时插件还提供 `alt+t` 作为 thinking 循环的替代；**3.2.0 起该键已移除**，
+  thinking 循环只剩 pi 内置的 `shift+tab` / `/thinking`）。
 - 本次改动：新增 `shortcuts` 配置段，三个快捷键均可自定义/禁用，
   **不配置时默认值与行为和旧版完全一致**。
 
@@ -33,17 +38,17 @@
 {
   "shortcuts": {
     "cycleMode": "ctrl+shift+m",
-    "cycleThinking": "alt+t",
-    "cycleProfile": "alt+i"
+    "cycleModeReverse": "alt+shift+x"
   }
 }
 ```
 
 | 字段 | 作用 | 默认值 |
 |---|---|---|
-| `cycleMode` | 循环权限模式 ● Ask → ⏸ Plan → ▶ Auto → ⚡ Bypass | `shift+tab` |
-| `cycleThinking` | 循环 thinking 等级 | `alt+t` |
-| `cycleProfile` | 循环模型 profile | `alt+i` |
+| `cycleMode` | 循环权限模式 ● Ask → ⏸ Read Only → ⏸ Plan → ▶ Auto → ⚡ Bypass | `shift+tab` |
+| `cycleModeReverse` | 反向循环权限模式（可选，默认不注册） | `null` |
+| ~~`cycleThinking`~~ | ~~循环 thinking 等级~~ —— **3.2.0 移除**，旧配置静默忽略 | ~~`alt+t`~~ |
+| ~~`cycleProfile`~~ | ~~循环模型 profile~~ —— **3.0.0 移除**（`model-profiles.json` 整体删除） | ~~`alt+i`~~ |
 
 规则：
 
@@ -114,8 +119,8 @@ New-Item -ItemType Junction -Path "$env:USERPROFILE\.pi\agent\extensions\permiss
 3. 按 `ctrl+shift+m`：模式依次循环 ● Ask → ⏸ Plan → ▶ Auto → ⚡ Bypass，
    且页脚第二行显示 `(ctrl+shift+m)`（原来是 `(shift+tab)`）。
 4. 按 `shift+tab`：不再触发模式切换（键已被改走）。
-5. 把配置改为 `"shortcuts": { "cycleProfile": null }` → `/reload` →
-   `alt+i` 应失效（profile 循环禁用）。
+5. 把配置改为 `"shortcuts": { "cycleModeReverse": "alt+shift+x" }` → `/reload` →
+   `alt+shift+x` 应能反向循环模式（原步骤验证的是已被移除的 `cycleProfile`）。
 6. 删掉整个 `shortcuts` 段 → `/reload` → `shift+tab` 恢复循环模式。
    此步依赖前置条件：`C:\Users\wpw\.pi\agent\keybindings.json` 中已有
    `{"app.thinking.cycle": []}`（本机已配置）。若没有该条目，`shift+tab`

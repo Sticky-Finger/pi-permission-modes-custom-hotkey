@@ -1,8 +1,8 @@
 # `alt+t` 思考强度循环快捷键与 pi 原生功能重复
 
-> 状态：**已知，暂不修复**
+> 状态：**已修复并验收**（3.2.0 移除 `shortcuts.cycleThinking` / `alt+t`；用户于 2026-11-09 用 `pi -ne -e ./dist/index.js` 实机验证通过）
 > 记录日期：2026-11-09
-> 关联：model-profile 移除（[20261007-1840-remove-model-profiles.md](../plan/20261007-1840-remove-model-profiles.md)）、可配置快捷键（[20260829-2239-configurable-shortcuts.md](../plan/20260829-2239-configurable-shortcuts.md)）
+> 关联：model-profile 移除（[20261007-1840-remove-model-profiles.md](../plan/20261007-1840-remove-model-profiles.md)）、可配置快捷键（[20260829-2239-configurable-shortcuts.md](../plan/20260829-2239-configurable-shortcuts.md)）、修复计划（[20261109-1559-remove-thinking-cycle-shortcut.md](../plan/20261109-1559-remove-thinking-cycle-shortcut.md)）
 
 ## 问题
 
@@ -27,12 +27,20 @@
 2. `/mode-hotkeys` 显示 `Cycle thinking level · shortcuts.cycleThinking | Alt+T | active`；
 3. 对比 pi 原生：`shift+tab`（`app.thinking.cycle`）或 `/thinking` 得到相同结果。
 
-## 修复方向（未排期）
+## 修复方向（已落地）
 
-- 移除 `cycleThinkingLevel()` 与对应注册，从 `/mode-hotkeys` 表格与 `ShortcutField` 联合中删掉 `cycleThinking`；
+- 删除 `cycleThinkingLevel()` 与对应注册，从 `/mode-hotkeys` 表格与 `ShortcutField` 联合中删掉 `cycleThinking`；
 - 兼容性：保留 `shortcuts.cycleThinking` 字段的解析（避免旧配置出现未知键），但不再注册；或仅在检测不到 pi 原生 `app.thinking.cycle` 时才注册；
 - 同步更新 `config.test.ts` 四处断言、README / AGENTS.md / `docs/testing-configurable-shortcuts.md` 的相关段落。
 
-## 重启条件
+## 修复结果（3.2.0）
 
-pi 移除 `app.thinking.cycle` / `/thinking` 时；或做快捷键与配置清理的版本时。
+- 插件不再注册任何思考强度快捷键：`ShortcutField` 只剩 `cycleMode` / `cycleModeReverse`，循环实现与 `THINKING_LEVELS` 一并删除；
+- 旧配置兼容：`shortcuts.cycleThinking` 静默忽略（不报错、不告警、不影响其它键），`config.test.ts` 与 `index.test.ts` 各有用例覆盖；
+- `/mode-hotkeys` 只剩正向 / 反向两行（新增用例断言行数为 2、输出不含 `cycleThinking` / `alt+t`）；
+- 文档同步：README（Model & thinking、快捷键表、Custom shortcuts、`shift+tab` 注记）、CHANGELOG `[Unreleased] → Removed`、`docs/testing-configurable-shortcuts.md`（标注历史 + 字段表更新）、`docs/README.md` 索引描述；
+- 验证：418 个测试全绿，产物 90,798 B / 31,474 B gzip，三道构建门禁全过。
+
+## 恢复条件（若日后需要）
+
+仅当 pi 移除 `app.thinking.cycle` / `/thinking` 且仍希望插件提供该能力时，才考虑重新引入（届时按新需求立项，不要直接回滚本提交）。

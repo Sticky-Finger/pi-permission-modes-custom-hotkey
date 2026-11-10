@@ -137,6 +137,7 @@ function createFakePi(): FakePi {
 	}))
 	const flags: Record<string, unknown> = { "permission-mode": "ask" }
 	const setModelCalls: Array<{ model: unknown }> = []
+	const setThinkingCalls: string[] = []
 	let thinkingLevel = "off"
 	const modelRegistry = new Map<string, Map<string, unknown>>()
 
@@ -167,8 +168,10 @@ function createFakePi(): FakePi {
 		},
 		flags,
 		setModelCalls,
+		setThinkingCalls,
 		getThinkingLevel: () => thinkingLevel,
 		setThinkingLevel: (l: string) => {
+			setThinkingCalls.push(l)
 			thinkingLevel = l
 		},
 		modelRegistry: {
@@ -1916,9 +1919,11 @@ describe("permission-modes: subagent inherits parent mode", () => {
 // ---- Configurable shortcuts ----------------------------------------------
 //
 // Shortcut keys resolve once at factory load from the `shortcuts` block of
-// ~/.pi/agent/permission-modes.json. Defaults (shift+tab / alt+t) must
-// hold when nothing is configured; individual keys can be overridden,
-// normalized to lowercase, or disabled with `null`.
+// ~/.pi/agent/permission-modes.json. The default mode-cycle key (shift+tab)
+// must hold when nothing is configured; individual keys can be overridden,
+// normalized to lowercase, or disabled with `null`. Thinking level is NOT
+// bound here: pi's native `app.thinking.cycle` (shift+tab) / `/thinking` own
+// it, and the old `alt+t` (`shortcuts.cycleThinking`) was removed in 3.2.0.
 
 describe("permission-modes extension: configurable shortcuts", () => {
 	let pi: FakePi
@@ -1940,9 +1945,34 @@ describe("permission-modes extension: configurable shortcuts", () => {
 			writeConfig({ classifier: { enabled: false } })
 			permissionModesExtension(makeFakePiForExtension(pi))
 			expect(pi.shortcuts.has("shift+tab")).toBe(true)
-			expect(pi.shortcuts.has("alt+t")).toBe(true)
+			// No thinking-cycle binding: pi's `app.thinking.cycle` owns shift+tab.
+			expect(pi.shortcuts.has("alt+t")).toBe(false)
 			// The reverse cycle is opt-in: unset means no key and no warning.
 			expect(pi.shortcuts.has("ctrl+shift+tab")).toBe(false)
+			expect(warn).not.toHaveBeenCalled()
+		} finally {
+			warn.mockRestore()
+		}
+	})
+
+	it("registers no thinking-cycle shortcut and never touches the thinking level", () => {
+		writeConfig({ classifier: { enabled: false } })
+		permissionModesExtension(makeFakePiForExtension(pi))
+		expect(pi.shortcuts.has("alt+t")).toBe(false)
+		// Load-time registration must not probe or set the level either.
+		expect(pi.setThinkingCalls).toEqual([])
+	})
+
+	it("ignores a legacy cycleThinking entry in the config file", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+		try {
+			writeConfig({
+				shortcuts: { cycleThinking: "alt+t", cycleMode: "ctrl+shift+m" },
+			})
+			permissionModesExtension(makeFakePiForExtension(pi))
+			// Silently dropped: no binding, no warning, other keys unaffected.
+			expect(pi.shortcuts.has("alt+t")).toBe(false)
+			expect(pi.shortcuts.has("ctrl+shift+m")).toBe(true)
 			expect(warn).not.toHaveBeenCalled()
 		} finally {
 			warn.mockRestore()
@@ -1990,8 +2020,8 @@ describe("permission-modes extension: configurable shortcuts", () => {
 			// default cycleMode key must not silently take its place either.
 			expect(pi.shortcuts.has("ctrl+m")).toBe(false)
 			expect(pi.shortcuts.has("shift+tab")).toBe(false)
-			// The remaining safe shortcuts are unaffected.
-			expect(pi.shortcuts.has("alt+t")).toBe(true)
+			// Nothing else is registered in its place (thinking is pi's own).
+			expect(pi.shortcuts.has("alt+t")).toBe(false)
 			expect(warn.mock.calls.some((c) => String(c[0]).includes("ctrl+m"))).toBe(true)
 		} finally {
 			warn.mockRestore()
@@ -2114,6 +2144,19 @@ describe("permission-modes extension: reverse mode cycle", () => {
 		expect(pi.sentMessages[pi.sentMessages.length - 1]?.opts).toEqual({
 			triggerTurn: false,
 		})
+	})
+
+	it("/mode-hotkeys lists only the two mode-cycle rows (no thinking cycle)", async () => {
+		load({ classifier: { enabled: false } })
+		await pi.simulateCommand("mode-hotkeys", "", ctx())
+		const content = hotkeysMessage()
+		const rows = content
+			.split("\n")
+			.filter((line) => line.startsWith("| Cycle"))
+		expect(rows).toHaveLength(2)
+		expect(content).not.toContain("Cycle thinking level")
+		expect(content).not.toContain("cycleThinking")
+		expect(content).not.toContain("alt+t")
 	})
 
 	it("/mode-hotkeys shows a configured reverse key as active", async () => {

@@ -42,14 +42,17 @@ export interface ShortcutConfig {
 	 * and no warning is produced for an unconfigured reverse shortcut.
 	 */
 	cycleModeReverse: string | null
-	/** Cycle thinking level. Default "alt+t". `null` disables. */
-	cycleThinking: string | null
 }
 
+/**
+ * `cycleThinking` was removed in 3.2.0: it duplicated pi's native
+ * `app.thinking.cycle` (`shift+tab`) / `/thinking`. A leftover value in the
+ * config file is silently ignored — the loader never rejects unknown keys, so
+ * old configs keep working without a warning.
+ */
 export const DEFAULT_SHORTCUTS: Readonly<Record<keyof ShortcutConfig, string | null>> = {
 	cycleMode: "shift+tab",
 	cycleModeReverse: null,
-	cycleThinking: "alt+t",
 } as const
 
 function normalizeShortcutKey(
@@ -70,7 +73,6 @@ export function resolveShortcuts(config: PermissionModesConfig): ShortcutConfig 
 			s.cycleModeReverse,
 			DEFAULT_SHORTCUTS.cycleModeReverse,
 		),
-		cycleThinking: normalizeShortcutKey(s.cycleThinking, DEFAULT_SHORTCUTS.cycleThinking),
 	}
 }
 
@@ -126,7 +128,7 @@ export interface PermissionModesConfig {
 		deny?: string[]
 		ask?: string[]
 	}
-	/** Keyboard shortcuts. Defaults: shift+tab / alt+t; reverse cycle is opt-in (`cycleModeReverse`, default null). `null` disables. */
+	/** Keyboard shortcuts. Default: `shift+tab` for the mode cycle; reverse cycle is opt-in (`cycleModeReverse`, default null). `null` disables. */
 	shortcuts?: Partial<ShortcutConfig>
 }
 

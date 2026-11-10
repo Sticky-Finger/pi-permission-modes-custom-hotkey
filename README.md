@@ -110,7 +110,7 @@ bash blocked by user. User feedback: use the local VERSION file instead
 
 ## Model & thinking
 
-**Switching permission modes never touches the model or the thinking level** — use pi's built-in `/model` and the `alt+t` shortcut instead. The model-profile system (`~/.pi/agent/model-profiles.json`, `/model-profile`, `Alt+I`, `--model-profile`) was removed in v3.0.0: it duplicated pi's native model switching and silently changed the model/effort on mode switches.
+**Switching permission modes never touches the model or the thinking level** — use pi's built-in `/model`, `/thinking` (or <kbd>Shift+Tab</kbd> to cycle the level). The model-profile system (`~/.pi/agent/model-profiles.json`, `/model-profile`, `Alt+I`, `--model-profile`) was removed in v3.0.0: it duplicated pi's native model switching and silently changed the model/effort on mode switches. The extension's own `alt+t` thinking-cycle shortcut was removed in 3.2.0 for the same reason — pi's `app.thinking.cycle` already covers it.
 
 ## Commands, shortcut, flag
 
@@ -120,9 +120,8 @@ bash blocked by user. User feedback: use the local VERSION file instead
 | Command | `/mode [name]` | set the given mode, or pick from a list |
 | Command | `/auto-depth <n>` | cap auto-mode follow-ups (`0` = unlimited; default 20) |
 | Shortcut | `Shift+Tab` | cycle modes (default — configurable, see below) |
-| Shortcut | `Alt+T` | cycle thinking level (off → minimal → low → medium → high → xhigh) |
 | Command | `/permissions` | list merged allow/deny/ask rules |
-| Command | `/mode-hotkeys` | list this extension's shortcuts (forward/reverse mode cycle, thinking cycle) and whether each one is actually registered |
+| Command | `/mode-hotkeys` | list this extension's shortcuts (forward/reverse mode cycle) and whether each one is actually registered |
 | Command | `/outside-writes` | list tracked outside-cwd writes (read-only) |
 | Command | `/undo-outside-writes` | restore outside-cwd writes (selector, `all`, or `--list`) |
 | Flag | `--permission-mode <name>` | start in a mode (accepts `readonly`, `ask`, `plan`, `auto`, `bypass`, or `default` as alias; default `ask`) |
@@ -131,19 +130,19 @@ bash blocked by user. User feedback: use the local VERSION file instead
 
 ### Custom shortcuts
 
-All three shortcuts are configurable via the `shortcuts` block in `~/.pi/agent/permission-modes.json`:
+Only the mode-cycle shortcuts are configurable, via the `shortcuts` block in `~/.pi/agent/permission-modes.json`:
 
 ```json
 {
   "shortcuts": {
     "cycleMode": "alt+x",
-    "cycleModeReverse": "alt+shift+x",
-    "cycleThinking": "alt+t"
+    "cycleModeReverse": "alt+shift+x"
   }
 }
 ```
 
-- **Defaults**: `cycleMode: "shift+tab"`, `cycleThinking: "alt+t"`, and `cycleModeReverse: null` — the reverse cycle is **opt-in**: no key is registered until you set one, and nothing is warned about while it is unset. Leave it out and the plugin behaves exactly like 3.1.0.
+- **Defaults**: `cycleMode: "shift+tab"` and `cycleModeReverse: null` — the reverse cycle is **opt-in**: no key is registered until you set one, and nothing is warned about while it is unset. Leave it out and the plugin behaves exactly like 3.1.0.
+- Thinking level is **not** part of this block: pi owns it (`app.thinking.cycle` on <kbd>Shift+Tab</kbd>, `/thinking`). The old `shortcuts.cycleThinking` (`alt+t`) was removed in 3.2.0; a leftover value is silently ignored.
 - Keys are normalized to lowercase before registering; set a key to `null` (or an empty string) to disable that shortcut.
 - **Unsafe keys are refused** (not registered) with a warning on stderr and at session start: terminal control-char aliases `ctrl+m` (= Enter/CR), `ctrl+i` (= Tab), `ctrl+j`, `ctrl+h` (= Backspace), `ctrl+[` (= Escape), the bare editor keys `tab` / `backspace` / `space`, and bare or `shift+`-prefixed single printable characters (they would shadow typing). Use a safe combo such as `ctrl+shift+m` or `alt+m` instead.
 - The footer hint follows the registered `cycleMode` key only (omitted when disabled or refused). The optional reverse key is deliberately **not** shown there — run `/mode-hotkeys` to see every key and its real status (`active`, `not configured (optional)`, `disabled`, `refused (unsafe key)`, `not registered (same as cycleMode)`).
@@ -157,7 +156,7 @@ All three shortcuts are configurable via the `shortcuts` block in `~/.pi/agent/p
 - Reverse uses the same switch path as forward: identical persistence, tool-set changes, plan-file handling, subagent mode inheritance and reminders — and it **never** touches the model or thinking level.
 - **Terminal caveat:** pi only receives `ctrl+shift+<letter>`, `alt+shift+<letter>`, `ctrl+tab` and `ctrl+shift+tab`-style combos from terminals that support the Kitty keyboard protocol or xterm `modifyOtherKeys`. Single-modifier `alt+<letter>` / `ctrl+<letter>` have a legacy encoding and work everywhere. `/mode-hotkeys` proves the extension registered the key — it cannot prove your terminal delivers it. If a key does nothing, try a legacy-safe combo such as `alt+r`.
 
-> **Note — `shift+tab` conflict with pi's built-in binding.** pi binds `app.thinking.cycle` (cycle thinking level) to `shift+tab` by default and reserves it against extensions, so the default `cycleMode` key is silently dropped on stock pi. Either remap `cycleMode` to a free key as above, or free the key by adding `{"app.thinking.cycle": []}` to `~/.pi/agent/keybindings.json` (thinking-level cycling remains available on this extension's `alt+t`).
+> **Note — `shift+tab` conflict with pi's built-in binding.** pi binds `app.thinking.cycle` (cycle thinking level) to `shift+tab` by default and reserves it against extensions, so the default `cycleMode` key is silently dropped on stock pi. Either remap `cycleMode` to a free key as above, or free the key by adding `{"app.thinking.cycle": []}` to `~/.pi/agent/keybindings.json` (thinking-level cycling then has to be rebound there too — this extension no longer offers its own `alt+t` fallback).
 
 ### Outside-cwd write tracking (v1.1.3)
 

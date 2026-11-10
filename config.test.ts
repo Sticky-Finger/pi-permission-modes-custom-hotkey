@@ -22,7 +22,6 @@ describe("resolveShortcuts", () => {
 		expect(resolveShortcuts({})).toEqual({
 			cycleMode: "shift+tab",
 			cycleModeReverse: null,
-			cycleThinking: "alt+t",
 		})
 	})
 
@@ -37,7 +36,6 @@ describe("resolveShortcuts", () => {
 		})
 		expect(resolved.cycleMode).toBe("ctrl+shift+m")
 		expect(resolved.cycleModeReverse).toBeNull()
-		expect(resolved.cycleThinking).toBe("alt+t")
 	})
 
 	it("leaves the reverse cycle unconfigured (opt-in) by default", () => {
@@ -54,19 +52,18 @@ describe("resolveShortcuts", () => {
 
 	it("normalizes case and surrounding whitespace", () => {
 		const resolved = resolveShortcuts({
-			shortcuts: { cycleMode: "  Shift+Tab  ", cycleThinking: "Alt+T" },
+			shortcuts: { cycleMode: "  Shift+Tab  ", cycleModeReverse: "Alt+Shift+X" },
 		})
 		expect(resolved.cycleMode).toBe("shift+tab")
-		expect(resolved.cycleThinking).toBe("alt+t")
+		expect(resolved.cycleModeReverse).toBe("alt+shift+x")
 	})
 
 	it("null disables a shortcut", () => {
 		const resolved = resolveShortcuts({
-			shortcuts: { cycleThinking: null, cycleModeReverse: null },
+			shortcuts: { cycleMode: null, cycleModeReverse: null },
 		})
-		expect(resolved.cycleThinking).toBeNull()
+		expect(resolved.cycleMode).toBeNull()
 		expect(resolved.cycleModeReverse).toBeNull()
-		expect(resolved.cycleMode).toBe("shift+tab")
 	})
 
 	it("empty or whitespace-only string disables a shortcut", () => {
@@ -86,6 +83,17 @@ describe("resolveShortcuts", () => {
 		})
 		expect(resolved.cycleMode).toBe("ctrl+k")
 		expect(resolved).not.toHaveProperty("unknownField")
+	})
+
+	it("no longer resolves the removed cycleThinking field (3.2.0)", () => {
+		// Legacy configs keep working: the value is simply dropped, no throw and
+		// no fallback binding — pi's native `app.thinking.cycle` owns that key now.
+		const resolved = resolveShortcuts({
+			shortcuts: { cycleThinking: "alt+t" } as PermissionModesConfig["shortcuts"],
+		})
+		expect(resolved).toEqual({ cycleMode: "shift+tab", cycleModeReverse: null })
+		expect(resolved).not.toHaveProperty("cycleThinking")
+		expect(DEFAULT_SHORTCUTS).not.toHaveProperty("cycleThinking")
 	})
 })
 
